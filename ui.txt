@@ -1,0 +1,2458 @@
+// ==UserScript==
+// @name         Kezas New Torn Look ALPHA
+// @namespace    nao.zero
+// @version      5.47
+// @description  Torn theme with custom Area button GIF and motion controls
+// @author       Keza[2672120]
+// @match        https://www.torn.com/*
+// @match        https://torn.com/*
+// @grant        none
+// @run-at       document-start
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const originalBackgroundUrl = 'https://res.cloudinary.com/e6vslnga/video/upload/v1790529412/12554223_3840_2160_30fps.mp4';
+    const BACKGROUND_PREF_KEY = 'keza-alpha-background-url-v1';
+    const RGB_ANIMATION_KEY = 'keza-alpha-rgb-animation-v1';
+    const RGB_SPEED_KEY = 'keza-alpha-rgb-speed-v1';
+    const ICON_ALERT_RGB_KEY = 'keza-alpha-icon-alert-rgb-v1';
+    const ICON_ALERT_RGB_SPEED_KEY = 'keza-alpha-icon-alert-rgb-speed-v1';
+    const MOTION_PREF_KEY = 'keza-alpha-motion-settings-v1';
+    const AREA_GIF_PREF_KEY = 'keza-alpha-area-button-gif-v1';
+    const defaultButtonGifUrl = 'https://i.pinimg.com/originals/e1/8c/1b/e18c1bad870b18e5c8eff03c75aaf40c.gif';
+    const loadingColor = '#160B2E';
+    const buttonColor = '#432267';
+    const buttonHoverColor = '#30164C';
+    const neonGreen = '#39FF14';
+
+    function normalizeAreaGifUrl(value) {
+        try {
+            const url = new URL(String(value || '').trim());
+            return (url.protocol === 'https:' || url.protocol === 'http:') && /\.gif$/i.test(url.pathname)
+                ? url.href
+                : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function loadAreaGifPreference() {
+        try {
+            const saved = normalizeAreaGifUrl(localStorage.getItem(AREA_GIF_PREF_KEY));
+            if (saved) return saved;
+        } catch (_) {}
+        return defaultButtonGifUrl;
+    }
+
+    let buttonGifUrl = loadAreaGifPreference();
+
+    const defaultMotionSettings = {
+        backgroundVideoEnabled: true,
+        backgroundVideoSpeed: 1,
+        buttonGifEnabled: true,
+        defaultTornAreaButtons: false
+    };
+
+    function loadMotionSettings() {
+        const result = Object.assign({}, defaultMotionSettings);
+        try {
+            const saved = JSON.parse(localStorage.getItem(MOTION_PREF_KEY) || 'null');
+            if (saved && typeof saved === 'object') {
+                ['backgroundVideoEnabled','buttonGifEnabled','defaultTornAreaButtons'].forEach((key) => {
+                    if (typeof saved[key] === 'boolean') result[key] = saved[key];
+                });
+                const speed = Number(saved.backgroundVideoSpeed);
+                if (Number.isFinite(speed)) {
+                    result.backgroundVideoSpeed = Math.round(Math.max(0.25, Math.min(2, speed))*4)/4;
+                }
+            }
+        } catch (_) {}
+        return result;
+    }
+
+    let motionSettings = loadMotionSettings();
+    if (document.documentElement && motionSettings.defaultTornAreaButtons) {
+        document.documentElement.classList.add('keza-default-area-button-colours');
+    }
+    const reducedMotionQuery = typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+    let refreshMotionPolicy = () => {};
+
+    function motionIsReduced() {
+        return Boolean(reducedMotionQuery && reducedMotionQuery.matches);
+    }
+
+    function saveMotionSettings() {
+        try { localStorage.setItem(MOTION_PREF_KEY,JSON.stringify(motionSettings)); } catch (_) {}
+    }
+
+    if (reducedMotionQuery) {
+        const onReducedMotionChange = () => refreshMotionPolicy();
+        if (typeof reducedMotionQuery.addEventListener === 'function') {
+            reducedMotionQuery.addEventListener('change',onReducedMotionChange);
+        } else if (typeof reducedMotionQuery.addListener === 'function') {
+            reducedMotionQuery.addListener(onReducedMotionChange);
+        }
+    }
+
+    document.addEventListener('visibilitychange',() => refreshMotionPolicy());
+
+    const areaButtonSelector = [
+        '#sidebarroot .pill',
+        '.areasWrapper .pill',
+        '.areasWrapper a',
+        '#sidebar [class*="areas___"] .pill',
+        '#sidebar [class*="areas___"] a'
+    ].join(', ');
+
+    const attentionSelector = [
+        'html body #sidebarroot div[id^="nav-"][class*="attention"]',
+        'html body #sidebar div[id^="nav-"][class*="attention"]',
+        'html body .areasWrapper div[id^="nav-"][class*="attention"]'
+    ].join(', ');
+
+    const sectionLabels = new Set(['Notes', 'NPCs', 'Reminders', 'Awards']);
+    const smallIconClass = 'keza-area-icon-green-tint';
+    const attentionIconSelector = attentionSelector.split(',')
+        .map((selector) => selector.trim() + ' .' + smallIconClass)
+        .join(', ');
+
+    const plumSurfaceClasses = [
+        'keza-plum-surface-dark',
+        'keza-plum-surface-medium',
+        'keza-plum-surface-light'
+    ];
+
+    const transparentLabelClass = 'keza-transparent-label-background';
+    const preserveNativeClass = 'keza-preserve-native-look';
+
+    const routeLabels = new Map([
+        ['/', 'Home'],
+        ['/index.php', 'Home'],
+        ['/item.php', 'Items'],
+        ['/items.php', 'Items'],
+        ['/gym.php', 'Gym'],
+        ['/crimes.php', 'Crimes'],
+        ['/city.php', 'City'],
+        ['/bookie.php', 'Bookie'],
+        ['/factions.php', 'My Faction'],
+        ['/faction.php', 'My Faction'],
+        ['/properties.php', 'Properties'],
+        ['/personalstats.php', 'Personal Stats'],
+        ['/job.php', 'Job'],
+        ['/companies.php?step=your&type=1', 'Job'],
+        ['/mission.php', 'Missions'],
+        ['/missions.php', 'Missions'],
+        ['/newspaper.php', 'Newspaper'],
+        ['/halloffame.php', 'Hall of Fame'],
+        ['/calendar.php', 'Calendar'],
+        ['/amarket.php', 'Auction House'],
+        ['/auction.php', 'Auction House'],
+        ['/auctionhouse.php', 'Auction House']
+    ]);
+
+    const pageSidLabels = new Map([
+        ['hof', 'Hall of Fame'],
+        ['crimes', 'Crimes'],
+        ['bookie', 'Bookie'],
+        ['missions', 'Missions'],
+        ['mission', 'Missions']
+    ]);
+
+    let sidebarUpdateQueued = false;
+    let lastPlumSurfaceScan = 0;
+    let surfaceScanQueued = false;
+
+    const style = document.createElement('style');
+
+    style.textContent = `
+        html,
+        body {
+            background: ${loadingColor} !important;
+        }
+
+        #local-video-background,
+        #torn-background-loading {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+        }
+
+        #local-video-background {
+            z-index: 0;
+            object-fit: cover;
+        }
+
+        #torn-background-loading {
+            z-index: 0;
+            background: ${loadingColor};
+        }
+
+        #root,
+        #game-container,
+        #app,
+        #mainContainer,
+        .content-wrapper,
+        .page-container {
+            position: relative;
+            z-index: 2;
+            background: transparent !important;
+        }
+
+        .content:not(.keza-preserve-native-look),
+        .panel:not(.keza-preserve-native-look),
+        .box:not(.keza-preserve-native-look) {
+            background-color: rgba(0, 0, 0, 0.35) !important;
+        }
+
+        /* Plum shades for neutral-grey surfaces in the main page content. */
+        #mainContainer .keza-plum-surface-dark {
+            background-color: #291E34 !important;
+            background-image: none !important;
+        }
+
+        #mainContainer .keza-plum-surface-medium {
+            background-color: #352641 !important;
+            background-image: none !important;
+        }
+
+        #mainContainer .keza-plum-surface-light {
+            background-color: #44324F !important;
+            background-image: none !important;
+        }
+
+        /* Keep own-faction member rows purple when idle and when hovered. */
+        html body #mainContainer .keza-faction-member-row,
+        html body #mainContainer .keza-faction-member-row:hover {
+            background-color: #352641 !important;
+            background-image: none !important;
+        }
+
+        /* Match the enemy list to the purple North Stand list on ranked war pages. */
+        html body #mainContainer .keza-war-left-surface,
+        html body #mainContainer .keza-war-left-surface:hover {
+            background-color: #352641 !important;
+            background-image: none !important;
+        }
+
+        /* Hide faction money balance detail rows. */
+        #mainContainer .keza-faction-balance-hidden {
+            display: none !important;
+        }
+
+        /* Remove TornTools' stats-estimate separator rows between faction members. */
+        #mainContainer .tt-stats-estimate {
+            display: none !important;
+        }
+
+        html body #mainContainer .keza-faction-member-surface-dark {
+            background-color: #291E34 !important;
+            background-image: none !important;
+        }
+
+        html body #mainContainer .keza-faction-member-surface-medium {
+            background-color: #352641 !important;
+            background-image: none !important;
+        }
+
+        html body #mainContainer .keza-faction-member-surface-light {
+            background-color: #44324F !important;
+            background-image: none !important;
+        }
+
+        /* Keep Torn's divider labels clear against the plum rows. */
+        #mainContainer span.divider,
+        #mainContainer span.divider > span,
+        #mainContainer .divider span {
+            background-color: transparent !important;
+            background-image: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Remove grey backgrounds from small text labels. */
+        #mainContainer .keza-transparent-label-background {
+            background-color: transparent !important;
+            background-image: none !important;
+            box-shadow: none !important;
+        }
+
+        /* Keep other sidebar controls and the original top bar intact. */
+        html:not(.keza-default-area-button-colours) #sidebarroot a:not(.pill),
+        html:not(.keza-default-area-button-colours) #sidebarroot button:not(.pill),
+        html:not(.keza-default-area-button-colours) #sidebarroot [role="button"]:not(.pill) {
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+
+        /* Animated purple GIF with a dark overlay for the Areas buttons. */
+        html:not(.keza-default-area-button-colours) #sidebarroot .pill,
+        html:not(.keza-default-area-button-colours) .areasWrapper .pill,
+        html:not(.keza-default-area-button-colours) .areasWrapper a,
+        html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] .pill,
+        html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] a {
+            background-color: ${buttonColor} !important;
+            background-image:
+                linear-gradient(rgba(16, 7, 28, 0.46), rgba(16, 7, 28, 0.46)),
+                ${motionSettings.buttonGifEnabled && !motionIsReduced() ? `url("${buttonGifUrl}")` : 'none'} !important;
+            background-size: cover !important;
+            background-position: center center !important;
+            background-repeat: no-repeat !important;
+            border-color: ${buttonHoverColor} !important;
+        }
+
+        /* Keep the current Area marked with a lilac outline. */
+        html:not(.keza-default-area-button-colours) #sidebarroot .keza-active-area-button,
+        html:not(.keza-default-area-button-colours) .areasWrapper .keza-active-area-button,
+        html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] .keza-active-area-button {
+            outline: 1px solid #C99BFF !important;
+            outline-offset: -2px !important;
+            box-shadow:
+                inset 0 0 0 1px rgba(230, 210, 255, 0.55),
+                0 0 7px rgba(170, 105, 235, 0.65) !important;
+            font-weight: bold !important;
+        }
+
+        html.keza-default-area-button-colours #sidebarroot .keza-active-area-button,
+        html.keza-default-area-button-colours .areasWrapper .keza-active-area-button,
+        html.keza-default-area-button-colours #sidebar [class*="areas___"] .keza-active-area-button {
+            outline: 1px solid #C99BFF !important;
+            outline-offset: -2px !important;
+            box-shadow: inset 0 0 0 1px rgba(230, 210, 255, 0.45) !important;
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+
+        html.keza-default-area-button-colours #sidebarroot .keza-active-area-button:hover,
+        html.keza-default-area-button-colours .areasWrapper .keza-active-area-button:hover,
+        html.keza-default-area-button-colours #sidebar [class*="areas___"] .keza-active-area-button:hover {
+            background-color: transparent !important;
+            background-image: none !important;
+        }
+
+        html.keza-default-area-button-colours #sidebarroot .keza-active-area-button *,
+        html.keza-default-area-button-colours .areasWrapper .keza-active-area-button *,
+        html.keza-default-area-button-colours #sidebar [class*="areas___"] .keza-active-area-button * {
+            background-color: transparent !important;
+            background-image: none !important;
+            box-shadow: none !important;
+        }
+
+        html.keza-default-area-button-colours #sidebarroot .keza-active-area-button::before,
+        html.keza-default-area-button-colours #sidebarroot .keza-active-area-button *::before,
+        html.keza-default-area-button-colours .areasWrapper .keza-active-area-button::before,
+        html.keza-default-area-button-colours .areasWrapper .keza-active-area-button *::before,
+        html.keza-default-area-button-colours #sidebar [class*="areas___"] .keza-active-area-button::before,
+        html.keza-default-area-button-colours #sidebar [class*="areas___"] .keza-active-area-button *::before {
+            background-color: transparent !important;
+            background-image: none !important;
+            box-shadow: none !important;
+        }
+
+        html:not(.keza-default-area-button-colours) #sidebarroot .pill:hover,
+        html:not(.keza-default-area-button-colours) .areasWrapper .pill:hover,
+        html:not(.keza-default-area-button-colours) .areasWrapper a:hover,
+        html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] .pill:hover,
+        html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] a:hover {
+            background-image:
+                linear-gradient(rgba(16, 7, 28, 0.78), rgba(16, 7, 28, 0.78)),
+                ${motionSettings.buttonGifEnabled && !motionIsReduced() ? `url("${buttonGifUrl}")` : 'none'} !important;
+        }
+
+        /* Keep the BSP Settings control neutral and outside the Areas GIF styling. */
+        html:not(.keza-default-area-button-colours) #sidebarroot .pill.keza-bsp-control,
+        html:not(.keza-default-area-button-colours) #sidebarroot .pill.keza-bsp-control:hover,
+        html:not(.keza-default-area-button-colours) #sidebarroot .keza-bsp-control,
+        html:not(.keza-default-area-button-colours) #sidebarroot .keza-bsp-control:hover,
+        html:not(.keza-default-area-button-colours) #sidebar .pill.keza-bsp-control,
+        html:not(.keza-default-area-button-colours) #sidebar .pill.keza-bsp-control:hover,
+        html:not(.keza-default-area-button-colours) #sidebar .keza-bsp-control,
+        html:not(.keza-default-area-button-colours) #sidebar .keza-bsp-control:hover,
+        html.keza-default-area-button-colours #sidebarroot .keza-bsp-control,
+        html.keza-default-area-button-colours #sidebarroot .keza-bsp-control:hover,
+        html.keza-default-area-button-colours #sidebar .keza-bsp-control,
+        html.keza-default-area-button-colours #sidebar .keza-bsp-control:hover {
+            background-color: #303030 !important;
+            background-image: none !important;
+            border-color: #555 !important;
+            box-shadow: none !important;
+        }
+
+        .keza-area-button-gif-host {
+            position: relative !important;
+            isolation: isolate !important;
+        }
+
+        .keza-area-button-gif-layer {
+            position: absolute !important;
+            inset: 0 !important;
+            z-index: -1 !important;
+            pointer-events: none !important;
+            border-radius: inherit !important;
+            background-size: 100% 100% !important;
+            background-position: center center !important;
+            background-repeat: no-repeat !important;
+            opacity: .45 !important;
+        }
+
+        /* Tint only icons inside Torn's currently attention-marked Areas. */
+        ${attentionIconSelector} {
+            filter: hue-rotate(220deg) saturate(4) !important;
+        }
+
+        /* Neon-green alert dots drawn by Torn's attention ::after element. */
+        ${attentionSelector}::after {
+            --sidebar-status-attention-bottom-layer-bg: ${neonGreen} !important;
+            --sidebar-status-attention-top-layer-bg: ${neonGreen} !important;
+            background-color: ${neonGreen} !important;
+            background-image: none !important;
+            border-color: ${neonGreen} !important;
+            box-shadow: 0 0 4px ${neonGreen} !important;
+            filter: none !important;
+        }
+
+        /* Style dropdown title bars immediately, without waiting for page scans. */
+        #mainContainer .sortable-box > .title,
+        #mainContainer .sortable-box > .title.main-title,
+        #mainContainer .sortable-box > .title.title-black,
+        #mainContainer .sortable-box .main-title.title-black {
+            color: #f4effa !important;
+            background: repeating-linear-gradient(
+                90deg,
+                #482961 0,
+                #482961 2px,
+                #563576 2px,
+                #563576 4px
+            ) !important;
+            background-color: #50306f !important;
+            background-image: repeating-linear-gradient(
+                90deg,
+                #482961 0,
+                #482961 2px,
+                #563576 2px,
+                #563576 4px
+            ) !important;
+            transition: none !important;
+        }
+
+        #mainContainer .sortable-box > .title:hover,
+        #mainContainer .sortable-box > .title.main-title:hover,
+        #mainContainer .sortable-box > .title.title-black:hover,
+        #mainContainer .sortable-box .main-title.title-black:hover {
+            background: repeating-linear-gradient(
+                90deg,
+                #50306f 0,
+                #50306f 2px,
+                #604080 2px,
+                #604080 4px
+            ) !important;
+            background-color: #59377a !important;
+            background-image: repeating-linear-gradient(
+                90deg,
+                #50306f 0,
+                #50306f 2px,
+                #604080 2px,
+                #604080 4px
+            ) !important;
+        }
+
+        /* Match the faction Rank tab to the same solid purple as its neighboring tabs. */
+        #mainContainer li[data-case="rank"],
+        #mainContainer li[data-case="rank"]::before,
+        #mainContainer li[data-case="rank"] > a,
+        #mainContainer li[data-case="rank"] > .ui-tabs-anchor {
+            color: #f4effa !important;
+            background-color: #41324B !important;
+            background-image: none !important;
+        }
+
+        /* Purple sidebar section headers. */
+        .keza-purple-section-header {
+            color: #f4effa !important;
+            background-color: #50306f !important;
+            background-image: repeating-linear-gradient(
+                90deg,
+                #482961 0,
+                #482961 2px,
+                #563576 2px,
+                #563576 4px
+            ) !important;
+        }
+
+        .keza-purple-section-header:hover {
+            background-color: #59377a !important;
+            background-image: repeating-linear-gradient(
+                90deg,
+                #50306f 0,
+                #50306f 2px,
+                #604080 2px,
+                #604080 4px
+            ) !important;
+        }
+    `;
+
+    const installThemeStyle = () => {
+        if (!document.documentElement) return;
+        document.documentElement.classList.toggle(
+            'keza-default-area-button-colours',
+            motionSettings.defaultTornAreaButtons
+        );
+        document.documentElement.appendChild(style);
+    };
+
+    if (document.documentElement) installThemeStyle();
+    else document.addEventListener('DOMContentLoaded',installThemeStyle,{once:true});
+
+
+    /* Fresh color settings system */
+    const COLOR_PREF_KEY = 'keza-alpha-color-panel-v1';
+    const colorPalettes = {
+        Purple: { mainPanel:'#352641', darkPanel:'#291E34', lightPanel:'#44324F', button:'#432267', buttonHover:'#30164C', active:'#C99BFF', icon:'#39FF14', alert:'#39FF14', header:'#50306F', headerHover:'#59377A', text:'#F4EFFA', border:'#604080', overlay:'#160B2E', factionRank:'#41324B' },
+        Blue: { mainPanel:'#182B42', darkPanel:'#101C2C', lightPanel:'#294A70', button:'#214C78', buttonHover:'#163451', active:'#59B8FF', icon:'#39FFFC', alert:'#39FFFC', header:'#285A8A', headerHover:'#3474AE', text:'#EAF6FF', border:'#3C79AD', overlay:'#071728', factionRank:'#182B42' },
+        Red: { mainPanel:'#421D24', darkPanel:'#291217', lightPanel:'#70313B', button:'#762A35', buttonHover:'#4B1921', active:'#FF6B7A', icon:'#FF3939', alert:'#FF3939', header:'#7D303B', headerHover:'#A4404D', text:'#FFF0F2', border:'#A84A56', overlay:'#240A0E', factionRank:'#421D24' },
+        Green: { mainPanel:'#19382A', darkPanel:'#10251C', lightPanel:'#2D6249', button:'#286044', buttonHover:'#19422F', active:'#63FF9A', icon:'#39FF6A', alert:'#39FF6A', header:'#2B6B4B', headerHover:'#3B8B62', text:'#EDFFF4', border:'#4B966D', overlay:'#071B11', factionRank:'#19382A' },
+        Orange: { mainPanel:'#432B19', darkPanel:'#291A0F', lightPanel:'#704722', button:'#77461C', buttonHover:'#4D2B11', active:'#FFB45C', icon:'#FFD439', alert:'#FFD439', header:'#7B4B21', headerHover:'#A9662B', text:'#FFF5E9', border:'#A96D34', overlay:'#211005', factionRank:'#432B19' },
+        Pink: { mainPanel:'#431D35', darkPanel:'#29121F', lightPanel:'#703153', button:'#762852', buttonHover:'#4B1935', active:'#FF78C8', icon:'#FF4DB8', alert:'#FF4DB8', header:'#7C3058', headerHover:'#A44073', text:'#FFF0FA', border:'#A94B7C', overlay:'#230A19', factionRank:'#431D35' },
+        Cyan: { mainPanel:'#17383C', darkPanel:'#0E2528', lightPanel:'#286169', button:'#21616A', buttonHover:'#16444A', active:'#5FFFF5', icon:'#39FFF2', alert:'#39FFF2', header:'#286C73', headerHover:'#36939A', text:'#EAFFFE', border:'#4A999D', overlay:'#061B1D', factionRank:'#17383C' },
+        Stealth: { mainPanel:'#24272B', darkPanel:'#151719', lightPanel:'#3A3E43', button:'#30343A', buttonHover:'#202328', active:'#AEB7C2', icon:'#B8FF00', alert:'#B8FF00', header:'#393E44', headerHover:'#4A5058', text:'#E8EAED', border:'#555C65', overlay:'#080909', factionRank:'#24272B' }
+    };
+    const colorFields = [
+        ['mainPanel','Main panels'], ['darkPanel','Dark panels'], ['lightPanel','Raised panels'],
+        ['button','Area buttons'], ['buttonHover','Button hover'], ['active','Current page highlight'],
+        ['icon','Area icon tint'], ['alert','Alert dots'], ['header','Section headers'],
+        ['headerHover','Header hover'], ['text','Theme text'], ['border','Borders'],
+        ['overlay','Background overlay'], ['factionRank','Faction Rank tab']
+    ];
+    const defaultColors = Object.assign({ preset:'Purple', overlayOpacity:0 }, colorPalettes.Purple);
+
+    function loadColorPreferences() {
+        const result = Object.assign({}, defaultColors);
+        try {
+            const saved = JSON.parse(localStorage.getItem(COLOR_PREF_KEY) || 'null');
+            if (saved && typeof saved === 'object') {
+                colorFields.forEach(([key]) => {
+                    if (typeof saved[key] === 'string' && /^#[0-9a-f]{6}$/i.test(saved[key])) {
+                        result[key] = saved[key].toUpperCase();
+                    }
+                });
+                if (Number.isFinite(Number(saved.overlayOpacity))) {
+                    result.overlayOpacity = Math.max(0, Math.min(65, Number(saved.overlayOpacity)));
+                }
+                if (saved.preset === 'Custom' || colorPalettes[saved.preset]) result.preset = saved.preset;
+            }
+        } catch (_) {}
+        return result;
+    }
+
+    let activeColors = loadColorPreferences();
+    const colorOverrideStyle = document.createElement('style');
+    colorOverrideStyle.id = 'keza-alpha-colors-v519';
+
+    function colorRgba(hex, alpha) {
+        const value = hex.replace('#','');
+        return 'rgba(' + parseInt(value.slice(0,2),16) + ',' +
+            parseInt(value.slice(2,4),16) + ',' + parseInt(value.slice(4,6),16) + ',' + alpha + ')';
+    }
+
+    function blendColor(hex, target, amount) {
+        const a = hex.replace('#','');
+        const b = target.replace('#','');
+        const mix = (start, end) => Math.round(parseInt(start,16) * (1-amount) + parseInt(end,16) * amount)
+            .toString(16).padStart(2,'0');
+        return ('#' + mix(a.slice(0,2),b.slice(0,2)) + mix(a.slice(2,4),b.slice(2,4)) +
+            mix(a.slice(4,6),b.slice(4,6))).toUpperCase();
+    }
+
+    function hueFilterFor(hex) {
+        const value = hex.replace('#','');
+        const r = parseInt(value.slice(0,2),16) / 255;
+        const g = parseInt(value.slice(2,4),16) / 255;
+        const b = parseInt(value.slice(4,6),16) / 255;
+        const max = Math.max(r,g,b), min = Math.min(r,g,b), delta = max-min;
+        let hue = 0;
+        if (delta) {
+            if (max === r) hue = 60 * (((g-b)/delta) % 6);
+            else if (max === g) hue = 60 * ((b-r)/delta + 2);
+            else hue = 60 * ((r-g)/delta + 4);
+        }
+        if (hue < 0) hue += 360;
+        return Math.round((220 + hue - 110 + 360) % 360);
+    }
+
+    function applyAreaIconTintDirectly() {
+        const color = activeColors.icon;
+        const filterValue = 'hue-rotate(' + hueFilterFor(color) + 'deg) saturate(4)';
+        document.querySelectorAll(attentionIconSelector).forEach((element) => {
+            const svg = element.matches('svg') ? element : element.closest('svg');
+            if (svg) {
+                // Vector and font icons can use the exact same solid color as the alert dot.
+                svg.style.setProperty('filter','none','important');
+                svg.style.setProperty('color',color,'important');
+                svg.querySelectorAll('path,circle,ellipse,line,polygon,polyline,rect').forEach((shape) => {
+                    const fillAttribute = shape.getAttribute('fill');
+                    const fillStyle = shape.style.fill;
+                    const strokeAttribute = shape.getAttribute('stroke');
+                    const strokeStyle = shape.style.stroke;
+                    const computed = window.getComputedStyle(shape);
+                    const hasFill = (fillAttribute && fillAttribute.toLowerCase() !== 'none') ||
+                        (fillStyle && fillStyle !== 'none') ||
+                        (!strokeAttribute && !strokeStyle && computed.fill !== 'none');
+                    const hasStroke = (strokeAttribute && strokeAttribute.toLowerCase() !== 'none') ||
+                        (strokeStyle && strokeStyle !== 'none') || computed.stroke !== 'none';
+                    if (hasFill) shape.style.setProperty('fill',color,'important');
+                    if (hasStroke) shape.style.setProperty('stroke',color,'important');
+                });
+            } else {
+                const computed = window.getComputedStyle(element);
+                const imageBased = element.matches('img,canvas') || computed.backgroundImage !== 'none';
+                if (imageBased) {
+                    // Keep the raster fallback, but apply it only to the icon itself.
+                    element.style.setProperty('filter',filterValue,'important');
+                } else {
+                    // Icon fonts and pseudo-element glyphs inherit this exact color.
+                    element.style.setProperty('filter','none','important');
+                    element.style.setProperty('color',color,'important');
+                }
+            }
+        });
+    }
+
+    function saveColorPreferences() {
+        try { localStorage.setItem(COLOR_PREF_KEY, JSON.stringify(activeColors)); } catch (_) {}
+    }
+
+    function applyThemeColors() {
+        const root = document.documentElement;
+        if (!root) return;
+        if (!colorOverrideStyle.isConnected) root.appendChild(colorOverrideStyle);
+
+        const purpleDefault = activeColors.preset === 'Purple' && activeColors.header.toUpperCase() === '#50306F';
+        const headingDark = purpleDefault ? '#482961' : blendColor(activeColors.header,'#000000',0.12);
+        const headingLight = purpleDefault ? '#563576' : blendColor(activeColors.header,'#FFFFFF',0.08);
+        const hoverDark = purpleDefault ? '#50306F' : blendColor(activeColors.headerHover,'#000000',0.12);
+        const hoverLight = purpleDefault ? '#604080' : blendColor(activeColors.headerHover,'#FFFFFF',0.08);
+        const buttonTint = activeColors.preset === 'Purple' ? '#10071C' : blendColor(activeColors.buttonHover,'#000000',0.52);
+        const buttonGifImage = motionSettings.buttonGifEnabled && !motionIsReduced()
+            ? 'url("'+buttonGifUrl+'")'
+            : 'none';
+
+        colorOverrideStyle.textContent = [
+            '#mainContainer .keza-plum-surface-dark{background:'+activeColors.darkPanel+'!important;background-image:none!important;}',
+            '#mainContainer .keza-plum-surface-medium{background:'+activeColors.mainPanel+'!important;background-image:none!important;}',
+            '#mainContainer .keza-plum-surface-light{background:'+activeColors.lightPanel+'!important;background-image:none!important;}',
+            'html body #mainContainer .keza-faction-member-row,html body #mainContainer .keza-faction-member-row:hover{background:'+activeColors.mainPanel+'!important;background-image:none!important;}',
+            'html body #mainContainer .keza-war-left-surface,html body #mainContainer .keza-war-left-surface:hover{background:'+activeColors.mainPanel+'!important;background-image:none!important;}',
+            'html body #mainContainer .keza-faction-member-surface-dark{background:'+activeColors.darkPanel+'!important;background-image:none!important;}',
+            'html body #mainContainer .keza-faction-member-surface-medium{background:'+activeColors.mainPanel+'!important;background-image:none!important;}',
+            'html body #mainContainer .keza-faction-member-surface-light{background:'+activeColors.lightPanel+'!important;background-image:none!important;}',
+            motionSettings.defaultTornAreaButtons ? '' : 'html:not(.keza-default-area-button-colours) #sidebarroot .pill,html:not(.keza-default-area-button-colours) .areasWrapper .pill,html:not(.keza-default-area-button-colours) .areasWrapper a,html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] .pill,html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] a{' +
+                'background-color:'+activeColors.button+'!important;background-image:linear-gradient('+colorRgba(buttonTint,.46)+','+
+                colorRgba(buttonTint,.46)+'),'+buttonGifImage+'!important;background-size:cover!important;background-position:center!important;' +
+                'background-repeat:no-repeat!important;border-color:'+activeColors.buttonHover+'!important;}',
+            motionSettings.defaultTornAreaButtons ? '' : 'html:not(.keza-default-area-button-colours) #sidebarroot .pill:hover,html:not(.keza-default-area-button-colours) .areasWrapper .pill:hover,html:not(.keza-default-area-button-colours) .areasWrapper a:hover,html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] .pill:hover,html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] a:hover{' +
+                'background-image:linear-gradient('+colorRgba(buttonTint,.78)+','+colorRgba(buttonTint,.78)+'),'+buttonGifImage+'!important;}',
+            motionSettings.defaultTornAreaButtons ? '' : 'html:not(.keza-default-area-button-colours) #sidebarroot .keza-active-area-button,html:not(.keza-default-area-button-colours) .areasWrapper .keza-active-area-button,html:not(.keza-default-area-button-colours) #sidebar [class*="areas___"] .keza-active-area-button{' +
+                'outline:1px solid '+activeColors.active+'!important;outline-offset:-2px!important;box-shadow:inset 0 0 0 1px '+
+                colorRgba(activeColors.active,.55)+',0 0 7px '+colorRgba(activeColors.active,.65)+'!important;}',
+            '.keza-area-button-gif-layer{background-image:'+buttonGifImage+'!important;}',
+            attentionIconSelector+'{' +
+                'filter:hue-rotate('+hueFilterFor(activeColors.icon)+'deg) saturate(4)!important;}',
+            attentionSelector+'::after{--sidebar-status-attention-bottom-layer-bg:'+activeColors.alert+'!important;' +
+                '--sidebar-status-attention-top-layer-bg:'+activeColors.alert+'!important;background-color:'+activeColors.alert+
+                '!important;background-image:none!important;border-color:'+activeColors.alert+'!important;box-shadow:0 0 4px '+
+                activeColors.alert+'!important;filter:none!important;}',
+            '#mainContainer .sortable-box>.title,#mainContainer .sortable-box>.title.main-title,#mainContainer .sortable-box>.title.title-black,#mainContainer .sortable-box .main-title.title-black{' +
+                'color:'+activeColors.text+'!important;background-color:'+activeColors.header+'!important;background-image:repeating-linear-gradient(90deg,'+
+                headingDark+' 0,'+headingDark+' 2px,'+headingLight+' 2px,'+headingLight+' 4px)!important;border-color:'+activeColors.border+'!important;}',
+            '#mainContainer .sortable-box>.title:hover,#mainContainer .sortable-box>.title.main-title:hover,#mainContainer .sortable-box>.title.title-black:hover,#mainContainer .sortable-box .main-title.title-black:hover{' +
+                'background-color:'+activeColors.headerHover+'!important;background-image:repeating-linear-gradient(90deg,'+
+                hoverDark+' 0,'+hoverDark+' 2px,'+hoverLight+' 2px,'+hoverLight+' 4px)!important;}',
+            '#mainContainer li[data-case="rank"],#mainContainer li[data-case="rank"]::before,#mainContainer li[data-case="rank"]>a,#mainContainer li[data-case="rank"]>.ui-tabs-anchor{' +
+                'color:'+activeColors.text+'!important;background:'+activeColors.factionRank+'!important;background-image:none!important;}',
+            '.keza-purple-section-header{color:'+activeColors.text+'!important;background-color:'+activeColors.header+'!important;background-image:repeating-linear-gradient(90deg,'+
+                headingDark+' 0,'+headingDark+' 2px,'+headingLight+' 2px,'+headingLight+' 4px)!important;}',
+            '.keza-purple-section-header:hover{background-color:'+activeColors.headerHover+'!important;background-image:repeating-linear-gradient(90deg,'+
+                hoverDark+' 0,'+hoverDark+' 2px,'+hoverLight+' 2px,'+hoverLight+' 4px)!important;}',
+            '#mainContainer .sortable-box>.title,#mainContainer .sortable-box>.title *,.keza-purple-section-header'+
+                (motionSettings.defaultTornAreaButtons ? '' : ',#sidebarroot .pill:not(.keza-bsp-control)')+'{color:'+activeColors.text+';}',
+            '#mainContainer .sortable-box{border-color:'+activeColors.border+';}',
+            '#keza-alpha-video-overlay{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;z-index:1!important;' +
+                'pointer-events:none!important;background:'+activeColors.overlay+'!important;opacity:'+(activeColors.overlayOpacity/100)+'!important;}'
+        ].join('\n');
+        applyAreaIconTintDirectly();
+    }
+
+    function makeControlStyle(element, declarations) {
+        element.style.cssText = declarations;
+    }
+
+    function createColorSettingsMenu() {
+        if (!document.body || document.getElementById('keza-alpha-settings-root')) return;
+
+        const root = document.createElement('div');
+        root.id = 'keza-alpha-settings-root';
+        makeControlStyle(root, 'position:fixed!important;left:14px!important;bottom:58px!important;z-index:2147483647!important;display:block!important;visibility:visible!important;opacity:1!important;pointer-events:none!important;');
+
+        const gear = document.createElement('button');
+        gear.id = 'keza-alpha-settings-gear';
+        gear.type = 'button';
+        gear.textContent = '⚙ Theme';
+        gear.title = 'Drag to move; click to open theme settings';
+        gear.setAttribute('aria-label','Open theme settings');
+        makeControlStyle(gear, 'display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;min-width:112px!important;height:40px!important;padding:0 12px!important;border:1px solid #604080!important;border-radius:22px!important;background:#291E34!important;color:#F4EFFA!important;box-shadow:0 2px 10px #0009!important;font:bold 14px Arial,sans-serif!important;cursor:move!important;touch-action:none!important;user-select:none!important;');
+
+        const panel = document.createElement('div');
+        panel.id = 'keza-alpha-settings-panel';
+        panel.setAttribute('role','dialog');
+        panel.setAttribute('aria-label','Kezas New Look Torn settings');
+        panel.style.cssText = 'position:absolute!important;left:0!important;bottom:48px!important;width:320px!important;max-width:calc(100vw - 28px)!important;max-height:72vh!important;overflow:auto!important;box-sizing:border-box!important;padding:12px!important;border:1px solid #604080!important;border-radius:9px!important;background:#201627!important;color:#F4EFFA!important;box-shadow:0 6px 24px #000c!important;font:13px Arial,sans-serif!important;display:none!important;pointer-events:auto!important;';
+
+        const heading = document.createElement('div');
+        heading.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;font-size:15px;font-weight:bold;';
+        const headingText = document.createElement('span');
+        headingText.textContent = 'Kezas New Look Torn';
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.textContent = '×';
+        close.title = 'Close';
+        close.style.cssText = 'border:0;background:transparent;color:inherit;font-size:21px;cursor:pointer;';
+        heading.append(headingText,close);
+        panel.appendChild(heading);
+
+        const presetRow = document.createElement('div');
+        presetRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid #604080;';
+        const presetLabel = document.createElement('label');
+        presetLabel.textContent = 'Preset';
+        const preset = document.createElement('select');
+        preset.setAttribute('aria-label','Colour preset');
+        preset.style.cssText = 'width:150px;padding:5px;border:1px solid #604080;border-radius:5px;background:#352641;color:#F4EFFA;';
+        Object.keys(colorPalettes).concat('Custom').forEach((name) => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            preset.appendChild(option);
+        });
+        preset.value = activeColors.preset;
+        presetRow.append(presetLabel,preset);
+        panel.appendChild(presetRow);
+
+        const controls = {};
+        let rgbTimer = null;
+        let rgbBaseColors = null;
+        let rgbBasePreset = 'Purple';
+        let rgbHue = 0;
+        let iconAlertTimer = null;
+        let iconAlertBaseColors = null;
+        let iconAlertBasePreset = 'Purple';
+        let iconAlertHue = 0;
+        colorFields.forEach(([key,labelText]) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;min-height:31px;gap:10px;border-bottom:1px solid #ffffff20;';
+            const label = document.createElement('label');
+            label.textContent = labelText;
+            label.htmlFor = 'keza-alpha-color-'+key;
+            const picker = document.createElement('input');
+            picker.type = 'color';
+            picker.id = 'keza-alpha-color-'+key;
+            picker.value = activeColors[key];
+            picker.setAttribute('aria-label',labelText);
+            picker.style.cssText = 'width:42px;height:23px;padding:1px;border:1px solid #604080;border-radius:4px;background:transparent;cursor:pointer;';
+            controls[key] = picker;
+            row.append(label,picker);
+            panel.appendChild(row);
+            picker.addEventListener('input',() => {
+                const selectedColor = picker.value.toUpperCase();
+                if (rgbEnabled) stopRgb(false);
+                if ((key === 'icon' || key === 'alert') && iconAlertRgbEnabled) stopIconAlertRgb(false);
+                activeColors[key] = selectedColor;
+                picker.value = selectedColor;
+                activeColors.preset = 'Custom';
+                preset.value = 'Custom';
+                applyThemeColors();
+                saveColorPreferences();
+            });
+        });
+
+        const dimRow = document.createElement('div');
+        dimRow.style.cssText = 'display:flex;align-items:center;gap:8px;padding:10px 0 3px;';
+        const dimLabel = document.createElement('label');
+        dimLabel.textContent = 'Background dimming';
+        const dim = document.createElement('input');
+        dim.type = 'range';
+        dim.min = '0';
+        dim.max = '65';
+        dim.step = '1';
+        dim.value = String(activeColors.overlayOpacity);
+        dim.style.cssText = 'flex:1;min-width:60px;accent-color:#C99BFF;';
+        const dimValue = document.createElement('span');
+        dimValue.textContent = activeColors.overlayOpacity+'%';
+        dimRow.append(dimLabel,dim,dimValue);
+        panel.appendChild(dimRow);
+        dim.addEventListener('input',() => {
+            activeColors.overlayOpacity = Number(dim.value);
+            activeColors.preset = 'Custom';
+            preset.value = 'Custom';
+            dimValue.textContent = activeColors.overlayOpacity+'%';
+            applyThemeColors();
+            saveColorPreferences();
+        });
+
+        const backgroundSection = document.createElement('div');
+        backgroundSection.style.cssText = 'margin-top:12px;padding-top:9px;border-top:1px solid #604080;';
+        const backgroundLabel = document.createElement('label');
+        backgroundLabel.textContent = 'Background image or video link';
+        backgroundLabel.htmlFor = 'keza-alpha-background-url';
+        backgroundLabel.style.cssText = 'display:block;margin-bottom:5px;font-weight:bold;';
+        const backgroundInput = document.createElement('input');
+        backgroundInput.type = 'url';
+        backgroundInput.id = 'keza-alpha-background-url';
+        backgroundInput.value = loadBackgroundPreference();
+        backgroundInput.placeholder = 'https://example.com/background.jpg';
+        backgroundInput.setAttribute('aria-label','Background image or video link');
+        backgroundInput.style.cssText = 'display:block;box-sizing:border-box;width:100%;padding:7px;border:1px solid #604080;border-radius:5px;background:#352641;color:#F4EFFA;';
+        const backgroundActions = document.createElement('div');
+        backgroundActions.style.cssText = 'display:flex;gap:7px;margin-top:7px;';
+        const applyBackground = document.createElement('button');
+        applyBackground.type = 'button';
+        applyBackground.textContent = 'Apply link';
+        const restoreBackground = document.createElement('button');
+        restoreBackground.type = 'button';
+        restoreBackground.textContent = 'Revert to original';
+        [applyBackground,restoreBackground].forEach((button) => {
+            button.style.cssText = 'flex:1;padding:7px 5px;border:1px solid #604080;border-radius:5px;background:#432267;color:#F4EFFA;font-weight:bold;cursor:pointer;';
+        });
+        const backgroundStatus = document.createElement('div');
+        backgroundStatus.setAttribute('aria-live','polite');
+        backgroundStatus.style.cssText = 'min-height:16px;margin-top:5px;color:#DCCBEA;font-size:12px;';
+        backgroundActions.append(applyBackground,restoreBackground);
+        backgroundSection.append(backgroundLabel,backgroundInput,backgroundActions,backgroundStatus);
+        panel.appendChild(backgroundSection);
+
+        const areaGifSection = document.createElement('div');
+        areaGifSection.style.cssText = 'margin-top:12px;padding-top:9px;border-top:1px solid #604080;';
+        const areaGifLabel = document.createElement('label');
+        areaGifLabel.textContent = 'Areas button GIF link';
+        areaGifLabel.htmlFor = 'keza-alpha-area-gif-url';
+        areaGifLabel.style.cssText = 'display:block;margin-bottom:5px;font-weight:bold;';
+        const areaGifInput = document.createElement('input');
+        areaGifInput.type = 'url';
+        areaGifInput.id = 'keza-alpha-area-gif-url';
+        areaGifInput.value = buttonGifUrl;
+        areaGifInput.placeholder = 'https://example.com/animated.gif';
+        areaGifInput.setAttribute('aria-label','Areas button GIF link');
+        areaGifInput.style.cssText = 'display:block;box-sizing:border-box;width:100%;padding:7px;border:1px solid #604080;border-radius:5px;background:#352641;color:#F4EFFA;';
+        const areaGifActions = document.createElement('div');
+        areaGifActions.style.cssText = 'display:flex;gap:7px;margin-top:7px;';
+        const applyAreaGif = document.createElement('button');
+        applyAreaGif.type = 'button';
+        applyAreaGif.textContent = 'Apply GIF';
+        const restoreAreaGif = document.createElement('button');
+        restoreAreaGif.type = 'button';
+        restoreAreaGif.textContent = 'Restore original';
+        [applyAreaGif,restoreAreaGif].forEach((button) => {
+            button.style.cssText = 'flex:1;padding:7px 5px;border:1px solid #604080;border-radius:5px;background:#432267;color:#F4EFFA;font-weight:bold;cursor:pointer;';
+        });
+        const areaGifStatus = document.createElement('div');
+        areaGifStatus.setAttribute('aria-live','polite');
+        areaGifStatus.style.cssText = 'min-height:16px;margin-top:5px;color:#DCCBEA;font-size:12px;';
+        areaGifActions.append(applyAreaGif,restoreAreaGif);
+        areaGifSection.append(areaGifLabel,areaGifInput,areaGifActions,areaGifStatus);
+        panel.appendChild(areaGifSection);
+
+        let areaGifRequestId = 0;
+        applyAreaGif.addEventListener('click',() => {
+            const requestId = ++areaGifRequestId;
+            const safeUrl = normalizeAreaGifUrl(areaGifInput.value);
+            if (!safeUrl) {
+                areaGifStatus.textContent = 'Enter a direct GIF link beginning with http:// or https://.';
+                return;
+            }
+            areaGifInput.value = safeUrl;
+            areaGifStatus.textContent = 'Checking GIF…';
+            const candidate = new Image();
+            candidate.onload = () => {
+                if (requestId !== areaGifRequestId) return;
+                buttonGifUrl = safeUrl;
+                try { localStorage.setItem(AREA_GIF_PREF_KEY,safeUrl); } catch (_) {}
+                applyThemeColors();
+                areaGifStatus.textContent = 'Areas button GIF updated.';
+            };
+            candidate.onerror = () => {
+                if (requestId !== areaGifRequestId) return;
+                areaGifStatus.textContent = 'Could not load that GIF; the current one was kept.';
+            };
+            candidate.src = safeUrl;
+        });
+
+        restoreAreaGif.addEventListener('click',() => {
+            areaGifRequestId++;
+            buttonGifUrl = defaultButtonGifUrl;
+            areaGifInput.value = defaultButtonGifUrl;
+            try { localStorage.removeItem(AREA_GIF_PREF_KEY); } catch (_) {}
+            applyThemeColors();
+            areaGifStatus.textContent = 'Original Areas button GIF restored.';
+        });
+
+        const defaultAreaColoursRow = document.createElement('label');
+        defaultAreaColoursRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;padding-top:8px;border-top:1px solid #ffffff20;cursor:pointer;';
+        const defaultAreaColoursText = document.createElement('span');
+        defaultAreaColoursText.textContent = 'Default Torn Area button colours (keep GIF)';
+        const defaultAreaColoursInput = document.createElement('input');
+        defaultAreaColoursInput.type = 'checkbox';
+        defaultAreaColoursInput.checked = motionSettings.defaultTornAreaButtons;
+        defaultAreaColoursInput.setAttribute('aria-label','Use Torn default colours on Area buttons and keep the GIF');
+        defaultAreaColoursInput.style.cssText = 'width:16px;height:16px;accent-color:#C99BFF;cursor:pointer;';
+        defaultAreaColoursInput.addEventListener('change',() => {
+            motionSettings.defaultTornAreaButtons = defaultAreaColoursInput.checked;
+            saveMotionSettings();
+            refreshMotionPolicy();
+        });
+        defaultAreaColoursRow.append(defaultAreaColoursText,defaultAreaColoursInput);
+        areaGifSection.appendChild(defaultAreaColoursRow);
+
+        const motionSection = document.createElement('div');
+        motionSection.style.cssText = 'margin-top:12px;padding-top:9px;border-top:1px solid #604080;';
+        const motionHeading = document.createElement('div');
+        motionHeading.textContent = 'Motion';
+        motionHeading.style.cssText = 'margin-bottom:5px;font-weight:bold;color:#DCCBEA;';
+        motionSection.appendChild(motionHeading);
+
+        const addMotionToggle = (key,labelText,ariaLabel) => {
+            const row = document.createElement('label');
+            row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:30px;border-bottom:1px solid #ffffff20;cursor:pointer;';
+            const label = document.createElement('span');
+            label.textContent = labelText;
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = motionSettings[key];
+            input.setAttribute('aria-label',ariaLabel);
+            input.style.cssText = 'width:16px;height:16px;accent-color:#C99BFF;cursor:pointer;';
+            input.addEventListener('change',() => {
+                motionSettings[key] = input.checked;
+                saveMotionSettings();
+                refreshMotionPolicy();
+            });
+            row.append(label,input);
+            motionSection.appendChild(row);
+        };
+
+        addMotionToggle('backgroundVideoEnabled','Background video','Enable background video motion');
+        addMotionToggle('buttonGifEnabled','Area button GIF','Enable animated GIF on Area buttons');
+        const videoSpeedRow = document.createElement('div');
+        videoSpeedRow.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0 3px;';
+        const videoSpeedLabel = document.createElement('label');
+        videoSpeedLabel.textContent = 'Video speed';
+        videoSpeedLabel.htmlFor = 'keza-alpha-background-video-speed';
+        const videoSpeedInput = document.createElement('input');
+        videoSpeedInput.type = 'range';
+        videoSpeedInput.id = 'keza-alpha-background-video-speed';
+        videoSpeedInput.min = '0.25';
+        videoSpeedInput.max = '2';
+        videoSpeedInput.step = '0.25';
+        videoSpeedInput.value = String(motionSettings.backgroundVideoSpeed);
+        videoSpeedInput.setAttribute('aria-label','Background video playback speed');
+        videoSpeedInput.style.cssText = 'flex:1;min-width:60px;accent-color:#C99BFF;cursor:pointer;';
+        const videoSpeedValue = document.createElement('span');
+        const formatVideoSpeed = (value) => Number(value).toFixed(2).replace(/0+$/,'').replace(/\.$/,'')+'×';
+        videoSpeedValue.textContent = formatVideoSpeed(motionSettings.backgroundVideoSpeed);
+        videoSpeedRow.append(videoSpeedLabel,videoSpeedInput,videoSpeedValue);
+        motionSection.appendChild(videoSpeedRow);
+        videoSpeedInput.addEventListener('input',() => {
+            motionSettings.backgroundVideoSpeed = Number(videoSpeedInput.value);
+            videoSpeedValue.textContent = formatVideoSpeed(motionSettings.backgroundVideoSpeed);
+            saveMotionSettings();
+            refreshMotionPolicy();
+        });
+
+        const motionStatus = document.createElement('div');
+        motionStatus.setAttribute('aria-live','polite');
+        motionStatus.style.cssText = 'min-height:16px;margin-top:4px;color:#DCCBEA;font-size:11px;';
+        motionSection.appendChild(motionStatus);
+        panel.appendChild(motionSection);
+
+        applyBackground.addEventListener('click',() => {
+            const safeUrl = normalizeBackgroundUrl(backgroundInput.value);
+            if (!safeUrl) {
+                backgroundStatus.textContent = 'Enter a valid link beginning with http:// or https://.';
+                return;
+            }
+            backgroundInput.value = safeUrl;
+            backgroundStatus.textContent = 'Loading background…';
+            applyBackgroundMedia(safeUrl,(success) => {
+                if (success) {
+                    try { localStorage.setItem(BACKGROUND_PREF_KEY,safeUrl); } catch (_) {}
+                    backgroundStatus.textContent = 'Background applied.';
+                } else {
+                    backgroundStatus.textContent = 'Could not load that link; the current background was kept.';
+                }
+            });
+        });
+        restoreBackground.addEventListener('click',() => {
+            backgroundStatus.textContent = 'Restoring original background…';
+            applyBackgroundMedia(originalBackgroundUrl,(success) => {
+                if (success) {
+                    try { localStorage.removeItem(BACKGROUND_PREF_KEY); } catch (_) {}
+                    backgroundInput.value = originalBackgroundUrl;
+                    backgroundStatus.textContent = 'Original background restored.';
+                } else {
+                    backgroundStatus.textContent = 'Could not reload the original background; the current one was kept.';
+                }
+            });
+        });
+
+        const rainbow = document.createElement('button');
+        rainbow.type = 'button';
+        rainbow.textContent = '🌈 Rainbow';
+        rainbow.title = 'Give every colour setting a random rainbow colour';
+        rainbow.style.cssText = 'display:block;width:100%;margin-top:10px;padding:8px 6px;border:1px solid #A78BC2;border-radius:5px;background:linear-gradient(90deg,#FF1744,#FF9100,#FFEA00,#76FF03,#00E5FF,#2979FF,#651FFF,#D500F9);color:#FFFFFF;text-shadow:0 1px 3px #000;font-weight:bold;cursor:pointer;';
+        panel.appendChild(rainbow);
+
+        let rgbEnabled = false;
+        try { rgbEnabled = localStorage.getItem(RGB_ANIMATION_KEY) === 'true'; } catch (_) {}
+        const rgbControls = document.createElement('div');
+        rgbControls.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:10px;padding-bottom:7px;border-bottom:1px solid #ffffff20;';
+        const rgbToggle = document.createElement('button');
+        rgbToggle.type = 'button';
+        rgbToggle.textContent = rgbEnabled ? 'Theme RGB: ON' : 'Theme RGB: OFF';
+        rgbToggle.title = 'Toggle RGB cycling for the full theme';
+        rgbToggle.setAttribute('aria-pressed',String(rgbEnabled));
+        rgbToggle.style.cssText = 'box-sizing:border-box;flex:0 0 42%;min-width:0;height:40px;padding:5px 3px;border:1px solid #604080;border-radius:5px;background:linear-gradient(90deg,#FF1744,#FF9100,#FFEA00,#76FF03,#00E5FF,#2979FF,#651FFF,#D500F9);color:#FFFFFF;text-shadow:0 1px 3px #000;font-size:12px;font-weight:bold;cursor:pointer;';
+
+        let rgbSpeed = 40;
+        try {
+            const storedSpeed = Number(localStorage.getItem(RGB_SPEED_KEY));
+            if (Number.isFinite(storedSpeed) && storedSpeed >= 5 && storedSpeed <= 120) rgbSpeed = storedSpeed;
+        } catch (_) {}
+        const rgbSpeedSection = document.createElement('div');
+        rgbSpeedSection.style.cssText = 'flex:1;min-width:0;';
+        const rgbSpeedHeading = document.createElement('div');
+        rgbSpeedHeading.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:4px;font-size:12px;';
+        const rgbSpeedLabel = document.createElement('span');
+        rgbSpeedLabel.textContent = 'Speed';
+        const rgbSpeedValue = document.createElement('span');
+        rgbSpeedValue.textContent = rgbSpeed+'°/s';
+        const rgbSpeedInput = document.createElement('input');
+        rgbSpeedInput.type = 'range';
+        rgbSpeedInput.min = '5';
+        rgbSpeedInput.max = '120';
+        rgbSpeedInput.step = '1';
+        rgbSpeedInput.value = String(rgbSpeed);
+        rgbSpeedInput.setAttribute('aria-label','RGB colour cycling speed');
+        rgbSpeedInput.style.cssText = 'display:block;width:100%;margin:0;accent-color:#C99BFF;cursor:pointer;';
+        rgbSpeedHeading.append(rgbSpeedLabel,rgbSpeedValue);
+        rgbSpeedSection.append(rgbSpeedHeading,rgbSpeedInput);
+        rgbControls.append(rgbToggle,rgbSpeedSection);
+        panel.appendChild(rgbControls);
+        rgbSpeedInput.addEventListener('input',() => {
+            rgbSpeed = Number(rgbSpeedInput.value);
+            rgbSpeedValue.textContent = rgbSpeed+'°/s';
+            try { localStorage.setItem(RGB_SPEED_KEY,String(rgbSpeed)); } catch (_) {}
+        });
+
+        let iconAlertSpeed = 40;
+        let iconAlertRgbEnabled = false;
+        try {
+            const storedIconAlertSpeed = Number(localStorage.getItem(ICON_ALERT_RGB_SPEED_KEY));
+            if (Number.isFinite(storedIconAlertSpeed) && storedIconAlertSpeed >= 5 && storedIconAlertSpeed <= 120) {
+                iconAlertSpeed = storedIconAlertSpeed;
+            }
+            iconAlertRgbEnabled = localStorage.getItem(ICON_ALERT_RGB_KEY) === 'true';
+        } catch (_) {}
+        const iconAlertRgbButton = document.createElement('button');
+        iconAlertRgbButton.type = 'button';
+        iconAlertRgbButton.textContent = iconAlertRgbEnabled ? 'Icons + dots: ON' : 'Icons + dots: OFF';
+        iconAlertRgbButton.title = 'Toggle RGB for the area icons and alert dots';
+        iconAlertRgbButton.setAttribute('aria-pressed',String(iconAlertRgbEnabled));
+        iconAlertRgbButton.style.cssText = 'box-sizing:border-box;flex:0 0 42%;min-width:0;height:40px;padding:5px 3px;border:1px solid #604080;border-radius:5px;background:linear-gradient(90deg,#FF1744,#FF9100,#FFEA00,#76FF03,#00E5FF,#2979FF,#651FFF,#D500F9);color:#FFFFFF;text-shadow:0 1px 3px #000;font-size:12px;font-weight:bold;cursor:pointer;';
+
+        const iconAlertControls = document.createElement('div');
+        iconAlertControls.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:10px;padding-bottom:7px;border-bottom:1px solid #ffffff20;';
+        const iconAlertSpeedSection = document.createElement('div');
+        iconAlertSpeedSection.style.cssText = 'flex:1;min-width:0;';
+        const iconAlertSpeedHeading = document.createElement('div');
+        iconAlertSpeedHeading.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:4px;font-size:12px;';
+        const iconAlertSpeedLabel = document.createElement('span');
+        iconAlertSpeedLabel.textContent = 'Speed';
+        const iconAlertSpeedValue = document.createElement('span');
+        iconAlertSpeedValue.textContent = iconAlertSpeed+'°/s';
+        const iconAlertSpeedInput = document.createElement('input');
+        iconAlertSpeedInput.type = 'range';
+        iconAlertSpeedInput.min = '5';
+        iconAlertSpeedInput.max = '120';
+        iconAlertSpeedInput.step = '1';
+        iconAlertSpeedInput.value = String(iconAlertSpeed);
+        iconAlertSpeedInput.setAttribute('aria-label','Area icon and alert dot RGB speed');
+        iconAlertSpeedInput.style.cssText = 'display:block;width:100%;margin:0;accent-color:#C99BFF;cursor:pointer;';
+        iconAlertSpeedHeading.append(iconAlertSpeedLabel,iconAlertSpeedValue);
+        iconAlertSpeedSection.append(iconAlertSpeedHeading,iconAlertSpeedInput);
+        iconAlertControls.append(iconAlertRgbButton,iconAlertSpeedSection);
+        panel.appendChild(iconAlertControls);
+        iconAlertSpeedInput.addEventListener('input',() => {
+            iconAlertSpeed = Number(iconAlertSpeedInput.value);
+            iconAlertSpeedValue.textContent = iconAlertSpeed+'°/s';
+            try { localStorage.setItem(ICON_ALERT_RGB_SPEED_KEY,String(iconAlertSpeed)); } catch (_) {}
+        });
+
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:8px;margin-top:11px;';
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.textContent = 'Restore ALPHA purple';
+        const done = document.createElement('button');
+        done.type = 'button';
+        done.textContent = 'Close';
+        [reset,done].forEach((button) => {
+            button.style.cssText = 'flex:1;padding:7px 5px;border:1px solid #604080;border-radius:5px;background:#432267;color:#F4EFFA;font-weight:bold;cursor:pointer;';
+        });
+        actions.append(reset,done);
+        panel.appendChild(actions);
+
+        const syncControls = () => {
+            preset.value = activeColors.preset;
+            colorFields.forEach(([key]) => { controls[key].value = activeColors[key]; });
+            dim.value = String(activeColors.overlayOpacity);
+            dimValue.textContent = activeColors.overlayOpacity+'%';
+        };
+
+        const hslToHex = (hue,saturation,lightness) => {
+            const chroma = (1-Math.abs(2*lightness-1))*saturation;
+            const segment = hue/60;
+            const second = chroma*(1-Math.abs(segment%2-1));
+            let rgb;
+            if (segment < 1) rgb = [chroma,second,0];
+            else if (segment < 2) rgb = [second,chroma,0];
+            else if (segment < 3) rgb = [0,chroma,second];
+            else if (segment < 4) rgb = [0,second,chroma];
+            else if (segment < 5) rgb = [second,0,chroma];
+            else rgb = [chroma,0,second];
+            const match = lightness-chroma/2;
+            return '#'+rgb.map(channel => Math.round((channel+match)*255).toString(16).padStart(2,'0')).join('').toUpperCase();
+        };
+
+        const stopRgb = (restoreColors) => {
+            if (rgbTimer !== null) {
+                clearInterval(rgbTimer);
+                rgbTimer = null;
+            }
+            if (!rgbEnabled) return;
+            if (restoreColors && rgbBaseColors) {
+                colorFields.forEach(([key]) => { activeColors[key] = rgbBaseColors[key]; });
+                activeColors.preset = rgbBasePreset;
+                if (iconAlertTimer !== null && iconAlertBaseColors) {
+                    iconAlertBaseColors.icon = rgbBaseColors.icon;
+                    iconAlertBaseColors.alert = rgbBaseColors.alert;
+                    iconAlertBasePreset = rgbBasePreset;
+                }
+            }
+            rgbBaseColors = null;
+            rgbEnabled = false;
+            rgbToggle.textContent = 'Theme RGB: OFF';
+            rgbToggle.setAttribute('aria-pressed','false');
+            try { localStorage.setItem(RGB_ANIMATION_KEY,'false'); } catch (_) {}
+            syncControls();
+            applyThemeColors();
+            saveColorPreferences();
+        };
+
+        const startRgb = (persist = true) => {
+            if (rgbTimer !== null) return;
+            if (!rgbBaseColors) {
+                rgbBaseColors = {};
+                colorFields.forEach(([key]) => { rgbBaseColors[key] = activeColors[key]; });
+                rgbBasePreset = activeColors.preset;
+                rgbHue = 0;
+            }
+            rgbEnabled = true;
+            rgbToggle.textContent = 'Theme RGB: ON';
+            rgbToggle.setAttribute('aria-pressed','true');
+            if (persist) {
+                try { localStorage.setItem(RGB_ANIMATION_KEY,'true'); } catch (_) {}
+            }
+            if (motionIsReduced() || document.hidden) return;
+            let lastFrameTime = performance.now();
+            const updateRgbFrame = () => {
+                const now = performance.now();
+                const elapsedSeconds = Math.min((now-lastFrameTime)/1000,0.1);
+                lastFrameTime = now;
+                colorFields.forEach(([key],index) => {
+                    if (iconAlertTimer !== null && (key === 'icon' || key === 'alert')) return;
+                    let lightness = 0.48;
+                    if (key === 'darkPanel' || key === 'overlay') lightness = 0.2;
+                    else if (key === 'mainPanel' || key === 'factionRank' || key === 'buttonHover') lightness = 0.32;
+                    else if (key === 'text') lightness = 0.88;
+                    else if (key === 'icon' || key === 'alert' || key === 'active' || key === 'border') lightness = 0.62;
+                    activeColors[key] = hslToHex((rgbHue+index*360/colorFields.length)%360,0.92,lightness);
+                });
+                activeColors.alert = activeColors.icon;
+                activeColors.preset = 'Custom';
+                syncControls();
+                applyThemeColors();
+                rgbHue = (rgbHue+rgbSpeed*elapsedSeconds)%360;
+            };
+            updateRgbFrame();
+            rgbTimer = window.setInterval(updateRgbFrame,33);
+        };
+
+        const stopIconAlertRgb = (restoreColors) => {
+            if (iconAlertTimer !== null) {
+                clearInterval(iconAlertTimer);
+                iconAlertTimer = null;
+            }
+            if (!iconAlertRgbEnabled) return;
+            if (restoreColors && iconAlertBaseColors) {
+                activeColors.icon = iconAlertBaseColors.icon;
+                activeColors.alert = iconAlertBaseColors.alert;
+                if (rgbTimer === null) activeColors.preset = iconAlertBasePreset;
+            }
+            iconAlertBaseColors = null;
+            iconAlertRgbEnabled = false;
+            iconAlertRgbButton.textContent = 'Icons + dots: OFF';
+            iconAlertRgbButton.setAttribute('aria-pressed','false');
+            try { localStorage.setItem(ICON_ALERT_RGB_KEY,'false'); } catch (_) {}
+            syncControls();
+            applyThemeColors();
+            saveColorPreferences();
+        };
+
+        const startIconAlertRgb = (persist = true) => {
+            if (iconAlertTimer !== null) return;
+            if (!iconAlertBaseColors) {
+                iconAlertBaseColors = {icon:activeColors.icon,alert:activeColors.alert};
+                iconAlertBasePreset = activeColors.preset;
+                iconAlertHue = 0;
+            }
+            iconAlertRgbEnabled = true;
+            iconAlertRgbButton.textContent = 'Icons + dots: ON';
+            iconAlertRgbButton.setAttribute('aria-pressed','true');
+            if (persist) {
+                try { localStorage.setItem(ICON_ALERT_RGB_KEY,'true'); } catch (_) {}
+            }
+            if (motionIsReduced() || document.hidden) return;
+            let lastFrameTime = performance.now();
+            const updateIconAlertFrame = () => {
+                const now = performance.now();
+                const elapsedSeconds = Math.min((now-lastFrameTime)/1000,0.1);
+                lastFrameTime = now;
+                activeColors.icon = hslToHex(iconAlertHue,0.95,0.62);
+                activeColors.alert = activeColors.icon;
+                activeColors.preset = 'Custom';
+                preset.value = 'Custom';
+                controls.icon.value = activeColors.icon;
+                controls.alert.value = activeColors.alert;
+                if (rgbTimer === null) applyThemeColors();
+                iconAlertHue = (iconAlertHue+iconAlertSpeed*elapsedSeconds)%360;
+            };
+            updateIconAlertFrame();
+            iconAlertTimer = window.setInterval(updateIconAlertFrame,33);
+        };
+
+        const pauseRgbForMotion = () => {
+            if (rgbTimer !== null) {
+                clearInterval(rgbTimer);
+                rgbTimer = null;
+            }
+            if (!rgbEnabled || !rgbBaseColors) return;
+            colorFields.forEach(([key]) => { activeColors[key] = rgbBaseColors[key]; });
+            activeColors.preset = rgbBasePreset;
+            if (iconAlertRgbEnabled && iconAlertBaseColors) {
+                iconAlertBaseColors.icon = rgbBaseColors.icon;
+                iconAlertBaseColors.alert = rgbBaseColors.alert;
+                iconAlertBasePreset = rgbBasePreset;
+            }
+            syncControls();
+            applyThemeColors();
+            saveColorPreferences();
+        };
+
+        const pauseIconAlertForMotion = () => {
+            if (iconAlertTimer !== null) {
+                clearInterval(iconAlertTimer);
+                iconAlertTimer = null;
+            }
+            if (!iconAlertRgbEnabled || !iconAlertBaseColors) return;
+            activeColors.icon = iconAlertBaseColors.icon;
+            activeColors.alert = iconAlertBaseColors.alert;
+            if (!rgbEnabled) activeColors.preset = iconAlertBasePreset;
+            syncControls();
+            applyThemeColors();
+            saveColorPreferences();
+        };
+
+        refreshMotionPolicy = () => {
+            const reduced = motionIsReduced();
+            const pauseAnimations = reduced || document.hidden;
+            const root = document.documentElement;
+            if (root) {
+                root.classList.toggle('keza-default-area-button-colours',motionSettings.defaultTornAreaButtons);
+            }
+            const background = document.getElementById('local-video-background');
+            if (background && background.tagName === 'VIDEO') {
+                background.playbackRate = motionSettings.backgroundVideoSpeed;
+                if (!motionSettings.backgroundVideoEnabled || reduced || document.hidden) {
+                    background.pause();
+                } else {
+                    background.play().catch(() => {});
+                }
+            }
+
+            if (pauseAnimations) {
+                pauseRgbForMotion();
+                pauseIconAlertForMotion();
+            } else {
+                if (rgbEnabled) startRgb(false);
+                if (iconAlertRgbEnabled) startIconAlertRgb(false);
+            }
+
+            if (reduced) {
+                motionStatus.textContent = 'System reduced motion is active; video, GIF, and RGB animation are paused.';
+            } else {
+                motionStatus.textContent = '';
+            }
+
+            refreshAreaButtonGifLayers();
+            applyThemeColors();
+        };
+
+        iconAlertRgbButton.addEventListener('click',() => {
+            if (iconAlertRgbEnabled) stopIconAlertRgb(true);
+            else startIconAlertRgb();
+        });
+
+        rgbToggle.addEventListener('click',() => {
+            if (!rgbEnabled) startRgb();
+            else stopRgb(true);
+        });
+
+        reset.addEventListener('click',() => {
+            if (rgbEnabled) stopRgb(false);
+            if (iconAlertRgbEnabled) stopIconAlertRgb(false);
+            activeColors = Object.assign({},defaultColors);
+            syncControls();
+            applyThemeColors();
+            saveColorPreferences();
+        });
+
+        rainbow.addEventListener('click',() => {
+            if (rgbEnabled) stopRgb(false);
+            if (iconAlertRgbEnabled) stopIconAlertRgb(false);
+            const rainbowColors = ['#FF1744','#FF6D00','#FFD600','#76FF03','#00E5FF','#2979FF','#651FFF','#D500F9'];
+            colorFields.forEach(([key]) => {
+                activeColors[key] = rainbowColors[Math.floor(Math.random()*rainbowColors.length)];
+            });
+            activeColors.preset = 'Custom';
+            syncControls();
+            applyThemeColors();
+            saveColorPreferences();
+        });
+
+        preset.addEventListener('change',() => {
+            if (rgbEnabled) stopRgb(false);
+            if (iconAlertRgbEnabled) stopIconAlertRgb(false);
+            if (colorPalettes[preset.value]) {
+                activeColors = Object.assign({},colorPalettes[preset.value],{
+                    preset:preset.value,
+                    overlayOpacity:activeColors.overlayOpacity
+                });
+                syncControls();
+                applyThemeColors();
+                saveColorPreferences();
+            } else {
+                activeColors.preset = 'Custom';
+                saveColorPreferences();
+            }
+        });
+
+        const closePanel = () => { panel.style.setProperty('display','none','important'); };
+        let dragState = null;
+        let suppressGearClick = false;
+
+        const applyFloatingPosition = (left,top,save) => {
+            const buttonRect = gear.getBoundingClientRect();
+            const maxLeft = Math.max(0,window.innerWidth-buttonRect.width);
+            const maxTop = Math.max(0,window.innerHeight-buttonRect.height);
+            const safeLeft = Math.min(Math.max(0,left),maxLeft);
+            const safeTop = Math.min(Math.max(0,top),maxTop);
+            root.style.setProperty('left',safeLeft+'px','important');
+            root.style.setProperty('top',safeTop+'px','important');
+            root.style.setProperty('right','auto','important');
+            root.style.setProperty('bottom','auto','important');
+
+            const alignRight = safeLeft+buttonRect.width/2 > window.innerWidth/2;
+            panel.style.setProperty('left',alignRight ? 'auto' : '0','important');
+            panel.style.setProperty('right',alignRight ? '0' : 'auto','important');
+            const openUp = safeTop+buttonRect.height/2 > window.innerHeight/2;
+            panel.style.setProperty('bottom',openUp ? '48px' : 'auto','important');
+            panel.style.setProperty('top',openUp ? 'auto' : '48px','important');
+
+            if (save) {
+                try { localStorage.setItem('keza-alpha-settings-position-v1',JSON.stringify({left:safeLeft,top:safeTop})); } catch (_) {}
+            }
+        };
+
+        gear.addEventListener('pointerdown',(event) => {
+            if (event.button !== 0) return;
+            const rect = gear.getBoundingClientRect();
+            dragState = {pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:rect.left,top:rect.top,moved:false};
+            try { gear.setPointerCapture(event.pointerId); } catch (_) {}
+        });
+        gear.addEventListener('pointermove',(event) => {
+            if (!dragState || event.pointerId !== dragState.pointerId) return;
+            const dx = event.clientX-dragState.startX;
+            const dy = event.clientY-dragState.startY;
+            if (!dragState.moved && Math.hypot(dx,dy) >= 4) dragState.moved = true;
+            if (dragState.moved) applyFloatingPosition(dragState.left+dx,dragState.top+dy,false);
+        });
+        const finishDrag = (event) => {
+            if (!dragState || event.pointerId !== dragState.pointerId) return;
+            if (dragState.moved) {
+                const rect = gear.getBoundingClientRect();
+                applyFloatingPosition(rect.left,rect.top,true);
+                suppressGearClick = true;
+                setTimeout(() => { suppressGearClick = false; },0);
+            }
+            dragState = null;
+        };
+        gear.addEventListener('pointerup',finishDrag);
+        gear.addEventListener('pointercancel',finishDrag);
+        gear.addEventListener('click',() => {
+            if (suppressGearClick) { suppressGearClick = false; return; }
+            const isOpen = panel.style.display !== 'none';
+            panel.style.setProperty('display',isOpen ? 'none' : 'block','important');
+            if (!isOpen) syncControls();
+        });
+        close.addEventListener('click',closePanel);
+        done.addEventListener('click',closePanel);
+        document.addEventListener('keydown',(event) => {
+            if (event.key === 'Escape') closePanel();
+        });
+
+        root.append(gear,panel);
+        document.body.appendChild(root);
+        let savedPosition = null;
+        try { savedPosition = JSON.parse(localStorage.getItem('keza-alpha-settings-position-v1') || 'null'); } catch (_) {}
+        const currentRect = gear.getBoundingClientRect();
+        if (savedPosition && Number.isFinite(savedPosition.left) && Number.isFinite(savedPosition.top)) {
+            applyFloatingPosition(savedPosition.left,savedPosition.top,false);
+        } else {
+            applyFloatingPosition(currentRect.left,currentRect.top,false);
+        }
+        window.addEventListener('resize',() => {
+            const rect = gear.getBoundingClientRect();
+            applyFloatingPosition(rect.left,rect.top,true);
+        });
+        applyThemeColors();
+        refreshMotionPolicy();
+    }
+
+    function ensureColorSettingsMenu() {
+        if (document.body && !document.getElementById('keza-alpha-settings-root')) {
+            createColorSettingsMenu();
+        }
+    }
+
+    function watchColorSettingsMount() {
+        if (!document.documentElement) return;
+        const observer = new MutationObserver(ensureColorSettingsMenu);
+        observer.observe(document.documentElement,{childList:true,subtree:true});
+        document.addEventListener('DOMContentLoaded',ensureColorSettingsMenu,{once:true});
+        window.addEventListener('load',ensureColorSettingsMenu,{once:true});
+    }
+
+    function normalizePath(path) {
+        const normalized = path.toLowerCase().replace(/\/+$/, '');
+        return normalized || '/';
+    }
+
+    function getRouteKey(value) {
+        let url;
+
+        try {
+            url = new URL(value, window.location.href);
+        } catch {
+            return null;
+        }
+
+        const path = normalizePath(url.pathname);
+
+        if (path === '/page.php') {
+            const sid = (url.searchParams.get('sid') || '').toLowerCase();
+            return `${path}?sid=${sid}`;
+        }
+
+        if (path === '/companies.php') {
+            const step = (url.searchParams.get('step') || '').toLowerCase();
+            const type = (url.searchParams.get('type') || '').toLowerCase();
+            return `${path}?step=${step}&type=${type}`;
+        }
+
+        return path;
+    }
+
+    function getCurrentAreaLabel() {
+        const currentUrl = new URL(window.location.href);
+        const currentPath = normalizePath(currentUrl.pathname);
+
+        if (currentPath === '/page.php') {
+            const sid = (currentUrl.searchParams.get('sid') || '').toLowerCase();
+            return pageSidLabels.get(sid) || null;
+        }
+
+        const currentRouteKey = getRouteKey(currentUrl.href);
+
+        return routeLabels.get(currentRouteKey) ||
+            routeLabels.get(currentPath) ||
+            null;
+    }
+
+    function getButtonLink(button) {
+        if (button.matches('a')) {
+            return button;
+        }
+
+        return button.closest('a') || button.querySelector('a');
+    }
+
+    function markButtonActive(button) {
+        button.classList.add('keza-active-area-button');
+
+        const pill = button.matches('.pill')
+            ? button
+            : button.closest('.pill') || button.querySelector('.pill');
+
+        if (pill) {
+            pill.classList.add('keza-active-area-button');
+        }
+
+        const link = getButtonLink(button);
+
+        if (link) {
+            link.classList.add('keza-active-area-button');
+        }
+    }
+
+    function updateActiveAreaButton() {
+        document.querySelectorAll('.keza-active-area-button').forEach((element) => {
+            element.classList.remove('keza-active-area-button');
+        });
+
+        const currentRouteKey = getRouteKey(window.location.href);
+        const currentLabel = getCurrentAreaLabel();
+        const buttons = document.querySelectorAll(areaButtonSelector);
+
+        buttons.forEach((button) => {
+            let matchesCurrentRoute = false;
+            const link = getButtonLink(button);
+
+            if (link) {
+                const href = link.getAttribute('href');
+
+                if (
+                    href &&
+                    !href.startsWith('#') &&
+                    !href.toLowerCase().startsWith('javascript:')
+                ) {
+                    const destinationRouteKey = getRouteKey(
+                        new URL(href, window.location.href).href
+                    );
+
+                    matchesCurrentRoute =
+                        destinationRouteKey !== null &&
+                        destinationRouteKey === currentRouteKey;
+                }
+            }
+
+            const buttonText = (button.innerText || button.textContent || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase();
+
+            const matchesCurrentLabel =
+                currentLabel &&
+                buttonText.includes(currentLabel.toLowerCase());
+
+            if (matchesCurrentRoute || matchesCurrentLabel) {
+                markButtonActive(button);
+            }
+        });
+    }
+
+    function markBspControlNative() {
+        document.querySelectorAll('.keza-bsp-control').forEach((element) => {
+            element.classList.remove('keza-bsp-control');
+        });
+
+        document.querySelectorAll('#sidebarroot, #sidebar').forEach((root) => {
+            const controls = Array.from(root.querySelectorAll('*'))
+                .filter((element) => {
+                    const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
+                    return text.length <= 64 && /BSP\s*Settings/i.test(text);
+                })
+                .map((element) => {
+                    const surface = element.closest('.pill, a, button, [role="button"]') || element;
+                    return { surface, rect: surface.getBoundingClientRect() };
+                })
+                .filter(({ rect }) => rect.width >= 80 && rect.height >= 22 && rect.height <= 72)
+                .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height));
+
+            if (!controls.length) return;
+            const surface = controls[0].surface.closest('.pill') || controls[0].surface;
+            if (root.contains(surface)) surface.classList.add('keza-bsp-control');
+        });
+    }
+
+    function recolorSectionHeaders() {
+        const roots = document.querySelectorAll(
+            '#sidebarroot, #sidebar, .tt-sidebar-area'
+        );
+
+        roots.forEach((root) => {
+            const rootWidth = root.getBoundingClientRect().width || 190;
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let textNode;
+
+            while ((textNode = walker.nextNode())) {
+                const label = textNode.nodeValue.trim();
+
+                if (!sectionLabels.has(label)) {
+                    continue;
+                }
+
+                let element = textNode.parentElement;
+
+                for (let depth = 0; element && element !== root && depth < 8; depth++) {
+                    const rect = element.getBoundingClientRect();
+
+                    if (
+                        rect.width >= Math.min(rootWidth * 0.8, 125) &&
+                        rect.height >= 17 &&
+                        rect.height <= 48
+                    ) {
+                        element.classList.add('keza-purple-section-header');
+                        break;
+                    }
+
+                    element = element.parentElement;
+                }
+            }
+        });
+    }
+
+    function parseCssColor(value) {
+        if (!value || value === 'transparent') {
+            return null;
+        }
+
+        const numbers = value.match(/[\d.]+/g);
+
+        if (!numbers || numbers.length < 3) {
+            return null;
+        }
+
+        return {
+            red: Number(numbers[0]),
+            green: Number(numbers[1]),
+            blue: Number(numbers[2]),
+            alpha: numbers.length >= 4 ? Number(numbers[3]) : 1
+        };
+    }
+
+    function getNeutralGrayValue(color) {
+        if (!color || color.alpha < 0.15) {
+            return null;
+        }
+
+        const max = Math.max(color.red, color.green, color.blue);
+        const min = Math.min(color.red, color.green, color.blue);
+        const brightness = (color.red + color.green + color.blue) / 3;
+
+        if (max - min > 16 || brightness < 35 || brightness > 155) {
+            return null;
+        }
+
+        return brightness;
+    }
+
+    function getGraySurfaceBrightness(computedStyle) {
+        const directColor = parseCssColor(computedStyle.backgroundColor);
+        const directBrightness = getNeutralGrayValue(directColor);
+
+        if (directBrightness !== null) {
+            return directBrightness;
+        }
+
+        const gradientColors =
+            computedStyle.backgroundImage.match(/rgba?\([^)]*\)/gi) || [];
+
+        for (const value of gradientColors) {
+            const brightness = getNeutralGrayValue(parseCssColor(value));
+
+            if (brightness !== null) {
+                return brightness;
+            }
+        }
+
+        return null;
+    }
+
+    function getPlumSurfaceClass(brightness) {
+        if (brightness < 58) {
+            return 'keza-plum-surface-dark';
+        }
+
+        if (brightness < 88) {
+            return 'keza-plum-surface-medium';
+        }
+
+        return 'keza-plum-surface-light';
+    }
+
+    function isOwnFactionInfoPage() {
+        try {
+            const url = new URL(window.location.href);
+            const hash = url.hash.toLowerCase();
+            return normalizePath(url.pathname) === '/factions.php' &&
+                url.searchParams.get('step') === 'your' &&
+                (!hash || hash.includes('tab=info'));
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function isFactionWarRankPage() {
+        try {
+            const url = new URL(window.location.href);
+            return normalizePath(url.pathname) === '/factions.php' &&
+                url.searchParams.get('step') === 'your' &&
+                url.hash.toLowerCase().startsWith('#/war/rank');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function getWarSurfaceBrightness(computedStyle) {
+        const color = parseCssColor(computedStyle.backgroundColor);
+        if (!color || color.alpha < 0.15) return null;
+
+        const maximum = Math.max(color.red, color.green, color.blue);
+        const minimum = Math.min(color.red, color.green, color.blue);
+        const brightness = (color.red + color.green + color.blue) / 3;
+        if (maximum - minimum > 48 || brightness < 25 || brightness > 165) return null;
+        return brightness;
+    }
+
+    function recolorRankedWarLeftRows() {
+        const root = document.querySelector('#mainContainer');
+        if (!root) return;
+
+        root.querySelectorAll('.keza-war-left-surface').forEach((element) => {
+            element.classList.remove('keza-war-left-surface');
+        });
+        if (!isFactionWarRankPage()) return;
+
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let filterLabel = null;
+        let textNode;
+        while ((textNode = walker.nextNode())) {
+            if ((textNode.nodeValue || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'ranked war filter') {
+                filterLabel = textNode.parentElement;
+                break;
+            }
+        }
+        if (!filterLabel) return;
+
+        const rootWidth = root.getBoundingClientRect().width || window.innerWidth;
+        let panel = filterLabel;
+        while (panel && panel !== root) {
+            const rect = panel.getBoundingClientRect();
+            if (rect.width >= Math.min(rootWidth * 0.55, 480) && rect.height >= 220) break;
+            panel = panel.parentElement;
+        }
+        if (!panel || panel === root) return;
+
+        const panelRect = panel.getBoundingClientRect();
+        const dividerX = panelRect.left + panelRect.width / 2;
+        const minimumRowWidth = Math.min(panelRect.width * 0.38, 300);
+        const maximumRowWidth = panelRect.width * 0.82;
+        const rows = new Set(panel.querySelectorAll('li.table-row, [class~="table-row"], [role="row"], tr'));
+
+        rows.forEach((row) => {
+            const rect = row.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            if (
+                rect.width < minimumRowWidth ||
+                rect.width > maximumRowWidth ||
+                rect.height < 18 ||
+                rect.height > 90 ||
+                centerX >= dividerX
+            ) return;
+
+            row.classList.add('keza-war-left-surface');
+            row.querySelectorAll('*').forEach((element) => {
+                if (element.matches('img, svg, path, video, canvas, input, textarea, select, button, [data-bsp-stats]')) return;
+                const style = window.getComputedStyle(element);
+                if (style.backgroundImage.includes('url(') && !style.backgroundImage.includes('gradient')) return;
+                if (getWarSurfaceBrightness(style) !== null) {
+                    element.classList.add('keza-war-left-surface');
+                }
+            });
+        });
+    }
+
+    function getFactionSurfaceBrightness(computedStyle) {
+        const colors = [parseCssColor(computedStyle.backgroundColor)];
+        const gradients = computedStyle.backgroundImage.match(/rgba?\([^)]*\)/gi) || [];
+        gradients.forEach((value) => colors.push(parseCssColor(value)));
+
+        for (const color of colors) {
+            if (!color || color.alpha < 0.15) continue;
+            const max = Math.max(color.red, color.green, color.blue);
+            const min = Math.min(color.red, color.green, color.blue);
+            const brightness = (color.red + color.green + color.blue) / 3;
+            if (max - min <= 20 && brightness <= 155) {
+                return brightness < 35 ? 35 : brightness;
+            }
+        }
+        return null;
+    }
+
+    function getFactionSurfaceClass(brightness) {
+        if (brightness < 58) return 'keza-faction-member-surface-dark';
+        if (brightness < 88) return 'keza-faction-member-surface-medium';
+        return 'keza-faction-member-surface-light';
+    }
+
+    function hideFactionMoneyBalanceRows(root) {
+        const balanceClass = 'keza-faction-balance-hidden';
+        root.querySelectorAll('.' + balanceClass).forEach((element) => {
+            element.classList.remove(balanceClass);
+        });
+
+        if (!isOwnFactionInfoPage()) return;
+
+        const rootWidth = root.getBoundingClientRect().width || window.innerWidth;
+        const minRowWidth = Math.min(rootWidth * 0.35, 420);
+        const profileLinkSelector = 'a[href*="profiles.php"], a[href*="xid="]';
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const balanceTextNodes = [];
+        let textNode;
+
+        while ((textNode = walker.nextNode())) {
+            if (/Money\s+Balance\s*:/i.test(textNode.nodeValue || '')) {
+                balanceTextNodes.push(textNode);
+            }
+        }
+
+        balanceTextNodes.forEach((balanceNode) => {
+            let row = balanceNode.parentElement;
+            while (row && row !== root && !row.matches('tr, [role="row"]')) {
+                row = row.parentElement;
+            }
+
+            if (row === root) row = null;
+            if (row && row.querySelector(profileLinkSelector)) row = null;
+
+            if (!row) {
+                let current = balanceNode.parentElement;
+                for (let depth = 0; current && current !== root && depth < 10; depth++) {
+                    const rect = current.getBoundingClientRect();
+                    const text = (current.innerText || current.textContent || '')
+                        .replace(/\s+/g, ' ')
+                        .trim();
+                    if (
+                        rect.width >= minRowWidth &&
+                        rect.height >= 12 &&
+                        rect.height <= 48 &&
+                        /Money\s+Balance\s*:/i.test(text) &&
+                        !current.querySelector(profileLinkSelector)
+                    ) {
+                        row = current;
+                        break;
+                    }
+                    current = current.parentElement;
+                }
+            }
+
+            if (row) row.classList.add(balanceClass);
+        });
+    }
+
+    function recolorOwnFactionMemberRows() {
+        const root = document.querySelector('#mainContainer');
+        if (!root) return;
+
+        const factionSurfaceClasses = [
+            'keza-faction-member-surface-dark',
+            'keza-faction-member-surface-medium',
+            'keza-faction-member-surface-light'
+        ];
+        root.querySelectorAll('[data-bsp-stats]').forEach((element) => {
+            element.classList.remove(
+                ...factionSurfaceClasses,
+                ...plumSurfaceClasses,
+                transparentLabelClass
+            );
+        });
+
+        const factionClasses = [
+            'keza-faction-member-row',
+            'keza-faction-member-surface-dark',
+            'keza-faction-member-surface-medium',
+            'keza-faction-member-surface-light',
+            'keza-faction-balance-hidden'
+        ];
+        if (!isOwnFactionInfoPage()) {
+            root.querySelectorAll(factionClasses.map((name) => '.' + name).join(',')).forEach((element) => {
+                element.classList.remove(...factionClasses);
+            });
+            return;
+        }
+
+        hideFactionMoneyBalanceRows(root);
+
+        const rootWidth = root.getBoundingClientRect().width || window.innerWidth;
+        const minRowWidth = Math.min(rootWidth * 0.35, 420);
+        const memberProfileLinks = Array.from(root.querySelectorAll('a')).filter((link) =>
+            /profiles\.php|[?&]xid=/i.test(link.getAttribute('href') || '') &&
+            !link.closest('#sidebarroot, #sidebar, .areasWrapper, .tt-sidebar-area')
+        );
+        const memberRows = new Set();
+
+        memberProfileLinks.forEach((link) => {
+            let row = link.closest('tr, [role="row"]');
+            if (row) {
+                const rect = row.getBoundingClientRect();
+                if (rect.width < minRowWidth || rect.height < 16 || rect.height > 110) row = null;
+            }
+
+            if (!row) {
+                let current = link;
+                for (let depth = 0; current && current !== root && depth < 10; depth++) {
+                    const rect = current.getBoundingClientRect();
+                    if (
+                        rect.width >= minRowWidth &&
+                        rect.height >= 20 &&
+                        rect.height <= 100
+                    ) {
+                        row = current;
+                        break;
+                    }
+                    current = current.parentElement;
+                }
+            }
+
+            if (row) memberRows.add(row);
+        });
+
+        memberRows.forEach((row) => {
+            if (row.closest('#sidebarroot, #sidebar, .areasWrapper, .tt-sidebar-area')) return;
+            row.classList.add('keza-faction-member-row');
+            row.querySelectorAll('*').forEach((element) => {
+                if (element.matches('img, svg, path, video, canvas, input, textarea, select, button')) return;
+                if (element.matches('[data-bsp-stats]')) {
+                    element.classList.remove(
+                        ...factionSurfaceClasses,
+                        ...plumSurfaceClasses,
+                        transparentLabelClass
+                    );
+                    return;
+                }
+                const rect = element.getBoundingClientRect();
+                if (rect.width < 24 || rect.height < 16) return;
+
+                const computedStyle = window.getComputedStyle(element);
+                if (
+                    computedStyle.backgroundImage.includes('url(') &&
+                    !computedStyle.backgroundImage.includes('gradient')
+                ) return;
+
+                const brightness = getFactionSurfaceBrightness(computedStyle);
+                if (brightness !== null) {
+                    element.classList.add(getFactionSurfaceClass(brightness));
+                }
+            });
+        });
+    }
+
+    function markOriginalAppearanceRegions(root) {
+        root.querySelectorAll('.' + preserveNativeClass).forEach((element) => {
+            element.classList.remove(preserveNativeClass);
+        });
+
+        const normalizeText = (value) =>
+            value.replace(/\s+/g, ' ').trim().toLowerCase();
+
+        const markSubtree = (element) => {
+            if (!element || element === root) {
+                return;
+            }
+
+            element.classList.add(preserveNativeClass);
+            element.querySelectorAll('*').forEach((child) => {
+                child.classList.add(preserveNativeClass);
+            });
+        };
+
+        const profileStatLabels = new Set([
+            'level',
+            'rank',
+            'age',
+            'playtime',
+            'play time'
+        ]);
+        const userProfileRoot = root.querySelector('.user-profile');
+
+        if (userProfileRoot) {
+            userProfileRoot.querySelectorAll('.box-info.age').forEach((element) => {
+                markSubtree(element);
+            });
+        }
+
+        const tbsHeaderLabels = new Set(['tbs', '% you', 'ff', 'source', 'date']);
+        const foundTbsHeaders = new Set();
+        let firstTbsHeader = null;
+
+        const textWalker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let textNode;
+
+        while ((textNode = textWalker.nextNode())) {
+            const label = normalizeText(textNode.nodeValue);
+
+            if (
+                profileStatLabels.has(label) &&
+                textNode.parentElement.closest('.user-profile')
+            ) {
+                let current = textNode.parentElement;
+
+                for (let depth = 0; current && current !== root && depth < 7; depth++) {
+                    current.classList.add(preserveNativeClass);
+
+                    const rect = current.getBoundingClientRect();
+
+                    if (
+                        depth > 0 &&
+                        rect.width >= 70 &&
+                        rect.width <= 340 &&
+                        rect.height >= 35 &&
+                        rect.height <= 240
+                    ) {
+                        markSubtree(current);
+                        break;
+                    }
+
+                    if (rect.width > 450 || rect.height > 260) {
+                        break;
+                    }
+
+                    current = current.parentElement;
+                }
+            }
+
+            if (tbsHeaderLabels.has(label)) {
+                foundTbsHeaders.add(label);
+                firstTbsHeader ||= textNode.parentElement;
+            }
+        }
+
+        const hasTbsHeaders = (element) => {
+            const text = normalizeText(element.textContent || '');
+            return text.includes('tbs') &&
+                text.includes('% you') &&
+                text.includes('ff') &&
+                text.includes('source') &&
+                text.includes('date');
+        };
+
+        const tableSelectors = [
+            'table',
+            '[role="table"]',
+            '[role="grid"]',
+            '[class*="table"]',
+            '[class*="Table"]'
+        ].join(', ');
+
+        let tbsTableFound = false;
+
+        for (const element of root.querySelectorAll(tableSelectors)) {
+            if (hasTbsHeaders(element)) {
+                markSubtree(element);
+                tbsTableFound = true;
+                break;
+            }
+        }
+
+        if (
+            !tbsTableFound &&
+            firstTbsHeader &&
+            ['tbs', '% you', 'ff', 'source', 'date']
+                .every((label) => foundTbsHeaders.has(label))
+        ) {
+            let current = firstTbsHeader;
+
+            for (let depth = 0; current && current !== root && depth < 9; depth++) {
+                if (hasTbsHeaders(current)) {
+                    const rect = current.getBoundingClientRect();
+
+                    if (rect.width <= 700 && rect.height <= 360) {
+                        markSubtree(current);
+                        break;
+                    }
+                }
+
+                current = current.parentElement;
+            }
+        }
+    }
+
+    function recolorGrayPageSurfaces() {
+        const now = Date.now();
+
+        if (now - lastPlumSurfaceScan < 600) {
+            return;
+        }
+
+        lastPlumSurfaceScan = now;
+
+        const root = document.querySelector('#mainContainer');
+
+        if (!root) {
+            return;
+        }
+
+        const excludedAreaSelector = [
+            '#sidebarroot',
+            '#sidebar',
+            '.areasWrapper',
+            '#header',
+            '#header-old',
+            '#topHeader',
+            '[class*="header-old"]'
+        ].join(', ');
+
+        markOriginalAppearanceRegions(root);
+
+        root.querySelectorAll('*').forEach((element) => {
+            if (element.classList.contains(preserveNativeClass)) {
+                element.classList.remove(
+                    ...plumSurfaceClasses,
+                    transparentLabelClass
+                );
+                return;
+            }
+
+            element.classList.remove(
+                ...plumSurfaceClasses,
+                transparentLabelClass
+            );
+
+            if (element.matches('[data-bsp-stats]')) {
+                element.classList.remove(
+                    'keza-faction-member-surface-dark',
+                    'keza-faction-member-surface-medium',
+                    'keza-faction-member-surface-light'
+                );
+                return;
+            }
+
+            if (
+                element.matches(
+                    'img, svg, path, video, canvas, input, textarea, select, button'
+                )
+            ) {
+                return;
+            }
+
+            if (element.closest(excludedAreaSelector)) {
+                return;
+            }
+
+            if (element.closest('span.divider')) {
+                return;
+            }
+
+            const rect = element.getBoundingClientRect();
+
+            if (rect.height < 16) {
+                return;
+            }
+
+            const computedStyle = window.getComputedStyle(element);
+
+            if (
+                computedStyle.backgroundImage.includes('url(') &&
+                !computedStyle.backgroundImage.includes('gradient')
+            ) {
+                return;
+            }
+
+            const brightness = getGraySurfaceBrightness(computedStyle);
+
+            if (brightness === null) {
+                return;
+            }
+
+            const isSmallTextLabel =
+                element.matches('span, label, strong, b, em, small') &&
+                rect.width <= 320 &&
+                rect.height <= 42 &&
+                (element.innerText || element.textContent || '').trim().length > 0;
+
+            if (isSmallTextLabel) {
+                element.classList.add(transparentLabelClass);
+                return;
+            }
+
+            if (rect.width < 90) {
+                return;
+            }
+
+            const viewportArea = window.innerWidth * window.innerHeight;
+            const elementArea = rect.width * rect.height;
+
+            if (viewportArea > 0 && elementArea > viewportArea * 0.42) {
+                return;
+            }
+
+            element.classList.add(getPlumSurfaceClass(brightness));
+        });
+    }
+
+    function markSmallAreaIcons() {
+        const buttons = new Set(document.querySelectorAll(areaButtonSelector));
+
+        buttons.forEach((button) => {
+            button.querySelectorAll('*').forEach((element) => {
+                if (element.classList.contains('keza-area-button-gif-layer')) return;
+                const computed = window.getComputedStyle(element);
+                const className =
+                    typeof element.className === 'string'
+                        ? element.className
+                        : element.getAttribute('class') || '';
+
+                const iconLike =
+                    element.matches('svg, img, i') ||
+                    /icon|symbol/i.test(className) ||
+                    computed.backgroundImage !== 'none';
+                const hasTornAlert = Boolean(element.closest(attentionSelector));
+                if (iconLike && hasTornAlert) {
+                    element.classList.add(smallIconClass);
+                } else {
+                    element.classList.remove(smallIconClass);
+                }
+            });
+        });
+        applyAreaIconTintDirectly();
+    }
+
+    function refreshAreaButtonGifLayers() {
+        const shouldShow =
+            motionSettings.defaultTornAreaButtons &&
+            motionSettings.buttonGifEnabled &&
+            !motionIsReduced();
+        const surfaces = new Set();
+
+        document.querySelectorAll(areaButtonSelector).forEach((button) => {
+            if (button.classList.contains('keza-bsp-control') || button.closest('.keza-bsp-control')) return;
+            const surface = button.matches('a') ? button : button.closest('a') || button;
+            if (surface) surfaces.add(surface);
+        });
+
+        document.querySelectorAll('.keza-area-button-gif-layer').forEach((layer) => {
+            const surface = layer.parentElement;
+            if (!shouldShow || !surfaces.has(surface)) {
+                layer.remove();
+                if (surface) surface.classList.remove('keza-area-button-gif-host');
+            }
+        });
+
+        if (!shouldShow) {
+            document.querySelectorAll('.keza-area-button-gif-host').forEach((surface) => {
+                surface.classList.remove('keza-area-button-gif-host');
+            });
+            return;
+        }
+
+        surfaces.forEach((surface) => {
+            if (!surface.isConnected) return;
+            surface.classList.add('keza-area-button-gif-host');
+            const hasLayer = Array.from(surface.children).some((child) =>
+                child.classList.contains('keza-area-button-gif-layer')
+            );
+            if (!hasLayer) {
+                const layer = document.createElement('span');
+                layer.className = 'keza-area-button-gif-layer';
+                layer.setAttribute('aria-hidden','true');
+                surface.prepend(layer);
+            }
+        });
+    }
+
+    function scheduleGraySurfaceRecolor() {
+        if (surfaceScanQueued) {
+            return;
+        }
+
+        surfaceScanQueued = true;
+
+        const runSurfaceScan = () => {
+            surfaceScanQueued = false;
+            recolorGrayPageSurfaces();
+        };
+
+        if (typeof window.requestIdleCallback === 'function') {
+            window.requestIdleCallback(runSurfaceScan, { timeout: 900 });
+        } else {
+            window.setTimeout(runSurfaceScan, 80);
+        }
+    }
+
+    function updateSidebarStyles() {
+        sidebarUpdateQueued = false;
+        recolorSectionHeaders();
+        markBspControlNative();
+        updateActiveAreaButton();
+        markSmallAreaIcons();
+        refreshAreaButtonGifLayers();
+        recolorOwnFactionMemberRows();
+        recolorRankedWarLeftRows();
+        scheduleGraySurfaceRecolor();
+    }
+
+    function scheduleSidebarUpdate() {
+        if (sidebarUpdateQueued) {
+            return;
+        }
+
+        sidebarUpdateQueued = true;
+        requestAnimationFrame(updateSidebarStyles);
+    }
+
+    function normalizeBackgroundUrl(value) {
+        try {
+            const url = new URL(String(value || '').trim());
+            return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function loadBackgroundPreference() {
+        try {
+            const saved = normalizeBackgroundUrl(localStorage.getItem(BACKGROUND_PREF_KEY));
+            if (saved) return saved;
+        } catch (_) {}
+        return originalBackgroundUrl;
+    }
+
+    function applyBackgroundMedia(value,onResult) {
+        const url = normalizeBackgroundUrl(value);
+        if (!url || !document.body) {
+            if (onResult) onResult(false);
+            return;
+        }
+
+        const isVideo = /\.(mp4|webm|ogv|ogg)$/i.test(new URL(url).pathname);
+        const media = document.createElement(isVideo ? 'video' : 'img');
+        let finished = false;
+        const previous = document.getElementById('local-video-background');
+        media.id = 'keza-alpha-background-pending';
+        media.style.cssText = 'position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;z-index:0!important;object-fit:cover!important;pointer-events:none!important;opacity:0!important;transition:opacity .2s linear!important;';
+
+        const finish = (success) => {
+            if (finished) return;
+            finished = true;
+            if (success) {
+                if (previous && previous.isConnected) previous.remove();
+                media.id = 'local-video-background';
+                media.style.setProperty('opacity','1','important');
+                refreshMotionPolicy();
+            } else {
+                media.remove();
+            }
+            if (onResult) onResult(success);
+        };
+
+        if (isVideo) {
+            media.autoplay = true;
+            media.muted = true;
+            media.loop = true;
+            media.playsInline = true;
+            media.preload = 'auto';
+            media.playbackRate = motionSettings.backgroundVideoSpeed;
+            media.addEventListener('canplay',() => finish(true),{once:true});
+            media.addEventListener('error',() => finish(false),{once:true});
+        } else {
+            media.alt = '';
+            media.decoding = 'async';
+            media.addEventListener('load',() => finish(true),{once:true});
+            media.addEventListener('error',() => finish(false),{once:true});
+        }
+
+        media.src = url;
+        document.body.prepend(media);
+        if (isVideo && motionSettings.backgroundVideoEnabled && !motionIsReduced() && !document.hidden) {
+            media.play().catch(() => {});
+        }
+    }
+
+    function addBackground() {
+        if (!document.body || document.getElementById('local-video-background')) {
+            return;
+        }
+
+        ensureColorSettingsMenu();
+        applyThemeColors();
+
+        const loadingLayer = document.createElement('div');
+        loadingLayer.id = 'torn-background-loading';
+        document.body.prepend(loadingLayer);
+
+        const themeOverlay = document.createElement('div');
+        themeOverlay.id = 'keza-alpha-video-overlay';
+        document.body.prepend(themeOverlay);
+
+        const requestedBackground = loadBackgroundPreference();
+        applyBackgroundMedia(requestedBackground,(success) => {
+            if (success) {
+                loadingLayer.remove();
+            } else if (requestedBackground !== originalBackgroundUrl) {
+                try { localStorage.removeItem(BACKGROUND_PREF_KEY); } catch (_) {}
+                applyBackgroundMedia(originalBackgroundUrl,(restored) => {
+                    if (restored) loadingLayer.remove();
+                });
+            } else {
+                loadingLayer.remove();
+                console.error('Background media failed to load.');
+            }
+        });
+
+        updateSidebarStyles();
+
+        const pageObserver = new MutationObserver(scheduleSidebarUpdate);
+        pageObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        window.addEventListener('popstate', scheduleSidebarUpdate);
+        window.addEventListener('hashchange', scheduleSidebarUpdate);
+    }
+
+    function initialize() {
+        if (!document.body) {
+            requestAnimationFrame(initialize);
+            return;
+        }
+
+        watchColorSettingsMount();
+        ensureColorSettingsMenu();
+        applyThemeColors();
+        addBackground();
+    }
+
+    initialize();
+})();
+
