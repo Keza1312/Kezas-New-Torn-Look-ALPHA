@@ -21,7 +21,7 @@
     const ICON_ALERT_RGB_SPEED_KEY = 'keza-alpha-icon-alert-rgb-speed-v1';
     const MOTION_PREF_KEY = 'keza-alpha-motion-settings-v1';
     const AREA_GIF_PREF_KEY = 'keza-alpha-area-button-gif-v1';
-    const defaultButtonGifUrl = 'https://i.pinimg.com/originals/e1/8c/1b/e18c1bad870b18e5c8eff03c75aaf40c.gif';
+    const defaultButtonGifUrl = 'ENTERS YOUR HERE';
     const loadingColor = '#160B2E';
     const buttonColor = '#432267';
     const buttonHoverColor = '#30164C';
